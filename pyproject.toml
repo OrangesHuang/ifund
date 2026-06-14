@@ -1,0 +1,37 @@
+[project]
+name = "ifund"
+version = "0.1.0"
+description = "公募基金筛选与数据管理系统"
+requires-python = ">=3.9"
+
+[tool.pylint.main]
+ignore = ["venv", "static", "node_modules"]
+jobs = 0
+
+[tool.pylint.messages_control]
+disable = []
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.basic]
+good-names = ["i", "j", "k", "e", "db", "id", "ip", "df", "fd", "ok", "f", "d", "ts", "bp"]
+
+[tool.pylint.typecheck]
+# flask-sqlalchemy 的 db 实例（db.Model/db.Column/...）为动态属性，避免误报 no-member
+ignored-classes = ["SQLAlchemy", "scoped_session"]
+
+[tool.pylint.similarities]
+min-similarity-lines = 8
+ignore-imports = true
+ignore-signatures = true
+
+[tool.pylint.design]
+max-args = 10
+max-positional-arguments = 10
+max-locals = 30
+max-branches = 20
+max-statements = 80
+max-attributes = 12
+max-public-methods = 25
+min-public-methods = 0

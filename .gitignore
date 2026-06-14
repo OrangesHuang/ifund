@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+backend/venv/
+backend/venv_py39_bak/
+.env
+backend/.env
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# Node / frontend
+node_modules/
+frontend/dist/
+backend/static/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Build
+build/
+dist/
+*.spec
