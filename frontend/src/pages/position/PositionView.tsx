@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react'
 import { Alert, Button, Card, Empty, Space, Spin, message } from 'antd'
 import { FundOutlined } from '@ant-design/icons'
 import request from '../../api/request'
@@ -6,8 +6,11 @@ import PositionRow from './PositionRow'
 import type { PositionResult } from './types'
 
 // ③ 簇级仓位建议视图：对共享预设镜像聚类后，按每簇 TOP1 基金景气度+乖离给出目标权重。
-// presetId 由工作台容器下传；预设变化时清空旧结果，需手动点「生成仓位建议」。
-export default function PositionView({ presetId }: { presetId: number | null }) {
+// presetId 由工作台容器下传；预设变化时自动生成仓位建议。
+const PositionView = forwardRef(function PositionView(
+  { presetId }: { presetId: number | null },
+  ref
+) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PositionResult | null>(null)
 
@@ -31,6 +34,8 @@ export default function PositionView({ presetId }: { presetId: number | null }) 
       setLoading(false)
     }
   }, [presetId])
+
+  useImperativeHandle(ref, () => ({ run }), [run])
 
   const items = result?.items
   const meta = result?.meta
@@ -79,4 +84,4 @@ export default function PositionView({ presetId }: { presetId: number | null }) 
       {!loading && !result && <Empty description="点「生成仓位建议」分析该预设镜像" />}
     </div>
   )
-}
+})

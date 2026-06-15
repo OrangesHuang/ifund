@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card, Select, Space, Tabs } from 'antd'
 import request from '../../api/request'
 import type { QueryPreset } from '../fund/types'
@@ -7,11 +7,13 @@ import ClusterView from '../cluster/ClusterView'
 import PositionView from '../position/PositionView'
 
 // 组合分析工作台：三类分析（镜像基金 / 聚类 / 仓位）共享同一个预设镜像，
-// 顶部只选一次预设，下方用 Tab 切换；各视图代码分别维护在各自模块。
+// 选择预设后自动运行聚类和仓位分析；用 Tab 切换不同视图。
 export default function WorkbenchPage() {
   const [presets, setPresets] = useState<QueryPreset[]>([])
   const [presetId, setPresetId] = useState<number | null>(null)
   const [tab, setTab] = useState('mirror')
+  const clusterRef = useRef<{ run: () => Promise<void> }>(null)
+  const positionRef = useRef<{ run: () => Promise<void> }>(null)
 
   useEffect(() => {
     request
@@ -19,6 +21,15 @@ export default function WorkbenchPage() {
       .then(({ data }) => setPresets(data.items ?? data ?? []))
       .catch(() => undefined)
   }, [])
+
+  // 预设变化时自动运行聚类和仓位分析
+  useEffect(() => {
+    if (!presetId) return
+    setTimeout(() => {
+      clusterRef.current?.run()
+      positionRef.current?.run()
+    }, 100)
+  }, [presetId])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -50,12 +61,12 @@ export default function WorkbenchPage() {
           {
             key: 'cluster',
             label: '聚类分析',
-            children: <ClusterView presetId={presetId} />,
+            children: <ClusterView ref={clusterRef} presetId={presetId} />,
           },
           {
             key: 'position',
             label: '仓位建议',
-            children: <PositionView presetId={presetId} />,
+            children: <PositionView ref={positionRef} presetId={presetId} />,
           },
         ]}
       />

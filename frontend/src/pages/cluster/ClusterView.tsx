@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react'
 import { Alert, Button, Collapse, Empty, Space, Spin, Tag, message } from 'antd'
 import { ClusterOutlined } from '@ant-design/icons'
 import request from '../../api/request'
@@ -6,8 +6,11 @@ import ClusterCard from './ClusterCard'
 import type { ClusterResult } from './types'
 
 // ② 行业暴露聚类视图：对共享预设的镜像快照做聚类分析。
-// presetId 由工作台容器下传；预设变化时清空旧结果，需手动点「运行聚类」。
-export default function ClusterView({ presetId }: { presetId: number | null }) {
+// presetId 由工作台容器下传；预设变化时自动运行聚类。
+const ClusterView = forwardRef(function ClusterView(
+  { presetId }: { presetId: number | null },
+  ref
+) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ClusterResult | null>(null)
 
@@ -31,6 +34,8 @@ export default function ClusterView({ presetId }: { presetId: number | null }) {
       setLoading(false)
     }
   }, [presetId])
+
+  useImperativeHandle(ref, () => ({ run }), [run])
 
   const clusters = result?.clusters
   const meta = result?.meta
@@ -88,4 +93,4 @@ export default function ClusterView({ presetId }: { presetId: number | null }) {
       {!loading && !result && <Empty description="点「运行聚类」分析该预设镜像" />}
     </div>
   )
-}
+})
