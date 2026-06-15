@@ -70,13 +70,18 @@ def select_funds(cands: list[list[dict]], cap: float = DEFAULT_CAP) -> list[int]
     return choice
 
 
-def rebalance_weights(base: list[float], vecs: list[dict], quality: list[float],
-                      cap: float = DEFAULT_CAP, step: float = 0.005) -> list[float]:
-    """在基准权重上做行业感知再分配：maximize Σ w·quality − 惩罚·max(0, 行业占比 − cap)。
+def rebalance_weights(base: list[float], vecs: list[dict],
+                      cap: float = DEFAULT_CAP, mu: float = 4.0,
+                      step: float = 0.005) -> list[float]:
+    """贴近景气基准、仅为满足单一行业上限做最小再分配。
 
-    base：景气度×乖离得到的基准权重（已截断到 [WMIN, WMAX] 并归一）；
-    vecs：各簇选中基金的行业向量；quality：各簇质量（归一景气度，0~1）。
-    用「从一簇挪 step 给另一簇」的局部搜索，始终满足 ∑w=1、w∈[WMIN,WMAX]。
+    景气度已编码在 base 里（target_weights 用景气×乖离算出），这里**不再最大化景气**
+    —— 否则景气被双重计入，且线性目标在盒约束下产生角点解（权重全堆到少数高景气簇
+    顶到 WMAX、其余压到 WMIN），导致两极分化。
+
+    目标 = −惩罚·max(0, 行业占比 − cap) − mu·∑(w − base)²：行业未超限时几乎保持 base
+    （健康的温和分布），超限时移动最少的权重把高集中行业压回上限。用「从一簇挪 step
+    给另一簇」的局部搜索，始终满足 ∑w=1、w∈[WMIN,WMAX]。
     """
     n = len(base)
     if n < 2:
@@ -84,8 +89,9 @@ def rebalance_weights(base: list[float], vecs: list[dict], quality: list[float],
     w = list(base)
 
     def objective(ww: list[float]) -> float:
-        share = _max_industry_share(vecs, ww)
-        return sum(ww[c] * quality[c] for c in range(n)) - _PENALTY * max(0.0, share - cap)
+        over = max(0.0, _max_industry_share(vecs, ww) - cap)
+        dev2 = sum((ww[c] - base[c]) ** 2 for c in range(n))
+        return -_PENALTY * over - mu * dev2
 
     best = objective(w)
     for _ in range(800):
@@ -97,7 +103,7 @@ def rebalance_weights(base: list[float], vecs: list[dict], quality: list[float],
                 w[i] -= step
                 w[j] += step
                 val = objective(w)
-                if val > best + 1e-9:
+                if val > best + 1e-12:
                     best, improved = val, True
                 else:
                     w[i] += step

@@ -199,10 +199,10 @@ def run(clusters: list[dict], nav_by_code: dict[str, list[tuple[str, float]]],
     pros = prosperity.compute(series_list)
     devs = [deviation.deviation(s) for s in series_list]
     base_weights = weights.target_weights([p["total"] for p in pros], devs)
-    # 行业感知再分配：把权重从高集中行业的簇挪向其它簇，使最大单一行业占比 ≤ cap
+    # 行业感知再分配：贴近景气基准，仅为把最大单一行业占比压到 ≤ cap 做最小调整
+    # （景气已编码在 base_weights，不再二次最大化，避免权重过度集中到少数簇）
     vecs = [cands[i][choice[i]]["vec"] for i in range(len(valid))]
-    quality = [p["total"] / 100.0 for p in pros]
-    target = optimize.rebalance_weights(base_weights, vecs, quality, cap)
+    target = optimize.rebalance_weights(base_weights, vecs, cap)
     base = round(1.0 / len(valid), 4)
 
     items, missing = [], []
