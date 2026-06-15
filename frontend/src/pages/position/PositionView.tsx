@@ -15,10 +15,19 @@ const PositionView = forwardRef<
 >(function PositionView({ presetId }, ref) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PositionResult | null>(null)
+  // 穿透联动：勾选的股票/行业，用于过滤+高亮下方代表基金
+  const [selStocks, setSelStocks] = useState<string[]>([])
+  const [selInds, setSelInds] = useState<string[]>([])
+
+  const clearSel = useCallback(() => {
+    setSelStocks([])
+    setSelInds([])
+  }, [])
 
   useEffect(() => {
     setResult(null)
-  }, [presetId])
+    clearSel()
+  }, [presetId, clearSel])
 
   const run = useCallback(async () => {
     if (!presetId) {
@@ -27,6 +36,7 @@ const PositionView = forwardRef<
     }
     setLoading(true)
     setResult(null)
+    clearSel()
     try {
       const { data } = await request.post<PositionResult>('/position/run', { preset_id: presetId })
       setResult(data)
@@ -35,7 +45,7 @@ const PositionView = forwardRef<
     } finally {
       setLoading(false)
     }
-  }, [presetId])
+  }, [presetId, clearSel])
 
   useImperativeHandle(ref, () => ({ run }), [run])
 
@@ -44,6 +54,16 @@ const PositionView = forwardRef<
   const portfolio = result?.portfolio
   const lookthrough = result?.lookthrough
   const maxWeight = items && items.length ? Math.max(...items.map((i) => i.weight)) : 0
+
+  // 联动过滤：勾选股票/行业后，仅保留「持有任一所选项」的代表基金（并集）
+  const stockSet = new Set(selStocks)
+  const indSet = new Set(selInds)
+  const hasSel = selStocks.length > 0 || selInds.length > 0
+  const shownItems = !items
+    ? []
+    : hasSel
+      ? items.filter((it) => (it.holdings ?? []).some((h) => stockSet.has(h.code) || indSet.has(h.industry)))
+      : items
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -82,14 +102,43 @@ const PositionView = forwardRef<
       )}
 
       {!loading && lookthrough && lookthrough.stocks.length > 0 && (
-        <LookthroughCard data={lookthrough} />
+        <LookthroughCard
+          data={lookthrough}
+          selStocks={selStocks}
+          selInds={selInds}
+          onSelStocks={setSelStocks}
+          onSelInds={setSelInds}
+        />
+      )}
+
+      {!loading && hasSel && items && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`已按 ${selStocks.length} 只股票 / ${selInds.length} 个行业筛选 · 命中 ${shownItems.length} / ${items.length} 只代表基金（并集，命中项已高亮）`}
+          action={
+            <Button size="small" type="link" onClick={clearSel}>
+              清除筛选
+            </Button>
+          }
+        />
       )}
 
       {!loading && items && items.length > 0 && (
         <Card title="各赛道仓位建议" size="small">
-          {items.map((it) => (
-            <PositionRow key={it.cluster_id} item={it} maxWeight={maxWeight} />
-          ))}
+          {shownItems.length === 0 ? (
+            <Empty description="所选股票/行业未命中任何代表基金" />
+          ) : (
+            shownItems.map((it) => (
+              <PositionRow
+                key={it.cluster_id}
+                item={it}
+                maxWeight={maxWeight}
+                highlightStocks={stockSet}
+                highlightInds={indSet}
+              />
+            ))
+          )}
         </Card>
       )}
 

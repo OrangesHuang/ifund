@@ -11,7 +11,18 @@ function fmt(v: number | null | undefined, suffix = ''): string {
 }
 
 // 单簇仓位建议行：左=目标权重 | 中=簇/基金/指标/走势图 + 前十大重仓股 | 右=景气四因子（收缩）
-export default function PositionRow({ item, maxWeight }: { item: PositionItem; maxWeight: number }) {
+// highlightStocks/highlightInds：穿透联动选中的股票/行业，命中的重仓股会高亮。
+export default function PositionRow({
+  item,
+  maxWeight,
+  highlightStocks,
+  highlightInds,
+}: {
+  item: PositionItem
+  maxWeight: number
+  highlightStocks?: Set<string>
+  highlightInds?: Set<string>
+}) {
   const { fund, prosperity: pros, deviation: dev, recommendation: rec } = item
   const pct = (item.weight * 100).toFixed(1)
   const basePct = (item.base_weight * 100).toFixed(1)
@@ -109,34 +120,57 @@ export default function PositionRow({ item, maxWeight }: { item: PositionItem; m
               <span style={{ fontSize: 12, color: '#8c8c8c' }}>暂无持仓数据</span>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 1 }}>
-                {holdings.map((h, i) => (
-                  <div
-                    key={`${h.code}-${i}`}
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, lineHeight: '20px' }}
-                  >
-                    <span style={{ color: '#8c8c8c', width: 14, textAlign: 'right', flexShrink: 0 }}>{i + 1}</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {h.name}
-                    </span>
-                    <Tooltip title={h.industry}>
+                {holdings.map((h, i) => {
+                  const hitStock = highlightStocks?.has(h.code) ?? false
+                  const hitInd = highlightInds?.has(h.industry) ?? false
+                  const hit = hitStock || hitInd
+                  return (
+                    <div
+                      key={`${h.code}-${i}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 12,
+                        lineHeight: '20px',
+                        background: hit ? 'rgba(250,173,20,0.18)' : undefined,
+                        borderRadius: hit ? 3 : 0,
+                      }}
+                    >
+                      <span style={{ color: '#8c8c8c', width: 14, textAlign: 'right', flexShrink: 0 }}>{i + 1}</span>
                       <span
                         style={{
-                          color: '#8c8c8c',
-                          flexShrink: 0,
-                          maxWidth: 84,
+                          flex: 1,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
+                          color: hitStock ? '#fa8c16' : 'inherit',
+                          fontWeight: hitStock ? 600 : 400,
                         }}
                       >
-                        {h.industry}
+                        {h.name}
                       </span>
-                    </Tooltip>
-                    <span style={{ flexShrink: 0, width: 46, textAlign: 'right', fontWeight: 600 }}>
-                      {h.ratio.toFixed(2)}%
-                    </span>
-                  </div>
-                ))}
+                      <Tooltip title={h.industry}>
+                        <span
+                          style={{
+                            color: hitInd ? '#fa8c16' : '#8c8c8c',
+                            fontWeight: hitInd ? 600 : 400,
+                            flexShrink: 0,
+                            maxWidth: 84,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {h.industry}
+                        </span>
+                      </Tooltip>
+                      <span style={{ flexShrink: 0, width: 46, textAlign: 'right', fontWeight: 600 }}>
+                        {h.ratio.toFixed(2)}%
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

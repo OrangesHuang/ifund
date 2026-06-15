@@ -3,9 +3,18 @@ import { Card, Col, Row, Segmented, Statistic, Table, Tag, Tooltip, theme } from
 import type { ColumnsType } from 'antd/es/table'
 import type { Lookthrough, LookthroughIndustry, LookthroughStock } from './types'
 
+interface Props {
+  data: Lookthrough
+  selStocks: string[]       // 勾选的股票代码（联动过滤下方基金）
+  selInds: string[]         // 勾选的行业
+  onSelStocks: (keys: string[]) => void
+  onSelInds: (keys: string[]) => void
+}
+
 // 底层持仓穿透：把各簇代表基金的前十大股票按目标权重累加，
 // 可切「按股票 / 按行业」——股票看集中度与重叠，行业看组合整体配置。
-export default function LookthroughCard({ data }: { data: Lookthrough }) {
+// 勾选股票/行业即联动下方仅显示持有它们的代表基金（并集）。
+export default function LookthroughCard({ data, selStocks, selInds, onSelStocks, onSelInds }: Props) {
   const { token } = theme.useToken()
   const [mode, setMode] = useState<'stock' | 'industry'>('stock')
 
@@ -161,6 +170,11 @@ export default function LookthroughCard({ data }: { data: Lookthrough }) {
           rowKey="code"
           columns={stockColumns}
           dataSource={data.stocks}
+          rowSelection={{
+            selectedRowKeys: selStocks,
+            onChange: (keys) => onSelStocks(keys as string[]),
+            columnWidth: 40,
+          }}
           pagination={{ pageSize: 10, size: 'small', showSizeChanger: false }}
         />
       ) : (
@@ -169,6 +183,11 @@ export default function LookthroughCard({ data }: { data: Lookthrough }) {
           rowKey="industry"
           columns={industryColumns}
           dataSource={data.industries}
+          rowSelection={{
+            selectedRowKeys: selInds,
+            onChange: (keys) => onSelInds(keys as string[]),
+            columnWidth: 40,
+          }}
           pagination={data.industries.length > 10 ? { pageSize: 10, size: 'small', showSizeChanger: false } : false}
         />
       )}
