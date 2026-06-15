@@ -64,3 +64,6 @@ def create_app() -> Flask:
         return jsonify({"detail": "frontend not built"}), 404
 
     return app
+
+
+app = create_app()

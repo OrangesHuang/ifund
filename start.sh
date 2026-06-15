@@ -15,13 +15,16 @@ if [ ! -d "$BACKEND/venv" ]; then
   "$PYBIN" -m venv "$BACKEND/venv"
 fi
 echo "[start] 安装后端依赖 ..."
-"$BACKEND/venv/bin/pip" install -q --upgrade pip
-"$BACKEND/venv/bin/pip" install -q -r "$BACKEND/requirements.txt" -i "$PIP_MIRROR"
+echo "[start] 升级 pip ..."
+"$BACKEND/venv/bin/pip" install --upgrade pip --default-timeout=1000
+echo "[start] 安装 requirements.txt ..."
+"$BACKEND/venv/bin/pip" install -r "$BACKEND/requirements.txt" -i "$PIP_MIRROR" --default-timeout=1000
 
 # 2. 前端依赖 + build（输出到 backend/static）
-echo "[start] 构建前端 ..."
+echo "[start] 安装前端依赖 ..."
 cd "$FRONTEND"
-npm install
+npm install --verbose
+echo "[start] 构建前端 ..."
 npm run build
 
 # 3. 启动双服务
