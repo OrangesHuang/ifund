@@ -8,7 +8,7 @@ const FACTORS: { key: keyof ProsperityBreakdown; label: string; hint: string }[]
   { key: 'consistency', label: '一致性', hint: '最近连续正收益月数 / 总月数' },
 ]
 
-// 景气度四因子迷你条（0–100），颜色随分值由灰转暖
+// 动量强度四因子迷你条（0–100），颜色随分值由灰转暖
 function barColor(v: number): string {
   if (v >= 66) return '#fa541c'
   if (v >= 40) return '#1677ff'

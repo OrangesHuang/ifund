@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react'
 import { Alert, Button, Card, Empty, Segmented, Space, Spin, Table, Tag, Tooltip, message } from 'antd'
-import { ClockCircleOutlined, CopyOutlined, FundOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, CopyOutlined, ExperimentOutlined, FundOutlined } from '@ant-design/icons'
 import request from '../../api/request'
 import PositionRow from './PositionRow'
 import PortfolioCharts from './PortfolioCharts'
 import LookthroughCard from './LookthroughCard'
-import type { PositionResult } from './types'
+import BacktestCard from './BacktestCard'
+import type { BacktestResponse, BacktestResult, PositionResult } from './types'
 
-// ③ 簇级仓位建议视图：对共享预设镜像聚类后，按每簇 TOP1 基金景气度+乖离给出目标权重。
+// ③ 簇级仓位建议视图：对共享预设镜像聚类后，按每簇代表基金动量强度+乖离给出目标权重。
 // presetId 由工作台容器下传；预设变化时自动生成仓位建议。
 const PositionView = forwardRef<
   { run: () => Promise<void> },
@@ -15,13 +16,16 @@ const PositionView = forwardRef<
 >(function PositionView({ presetId }, ref) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PositionResult | null>(null)
-  // 均衡强度：单一行业穿透占比上限 cap，越小越分散（牺牲更多景气权重），越大越接近纯景气
+  // 均衡强度：单一行业穿透占比上限 cap，越小越分散（牺牲更多动量权重），越大越接近纯动量
   const [cap, setCap] = useState(0.18)
   // 仓位建议展示模式：detail=完整（指标/走势/持仓），simple=简洁（名称/编码/比例，便于复制）
   const [viewMode, setViewMode] = useState<'detail' | 'simple'>('detail')
   // 穿透联动：勾选的股票/行业，用于过滤+高亮下方代表基金
   const [selStocks, setSelStocks] = useState<string[]>([])
   const [selInds, setSelInds] = useState<string[]>([])
+  // 回测验证：动量调权 vs 等权（按需触发，较重）
+  const [backtest, setBacktest] = useState<BacktestResult | null>(null)
+  const [btLoading, setBtLoading] = useState(false)
 
   const clearSel = useCallback(() => {
     setSelStocks([])
@@ -30,6 +34,7 @@ const PositionView = forwardRef<
 
   useEffect(() => {
     setResult(null)
+    setBacktest(null)
     clearSel()
   }, [presetId, clearSel])
 
@@ -41,6 +46,7 @@ const PositionView = forwardRef<
     }
     setLoading(true)
     setResult(null)
+    setBacktest(null)   // 重新生成建议后，旧回测失效
     clearSel()
     try {
       const { data } = await request.post<PositionResult>('/position/run', {
@@ -55,16 +61,40 @@ const PositionView = forwardRef<
     }
   }, [presetId, clearSel, cap])
 
+  // 回测验证：固定当前代表基金集合，walk-forward 比较动量调权 vs 等权
+  const runBacktest = useCallback(async () => {
+    if (!presetId) {
+      message.warning('请先在上方选择一个预设')
+      return
+    }
+    setBtLoading(true)
+    setBacktest(null)
+    try {
+      const { data } = await request.post<BacktestResponse>('/position/backtest', {
+        preset_id: presetId,
+        cap,
+      })
+      if (data.result) setBacktest(data.result)
+      else message.info(data.reason ?? '无法回测')
+    } catch {
+      message.error('回测失败')
+    } finally {
+      setBtLoading(false)
+    }
+  }, [presetId, cap])
+
   // 工作台容器在预设变化时通过 ref 触发，用当前均衡强度
   useImperativeHandle(ref, () => ({ run: () => run() }), [run])
 
   const onCapChange = (v: number) => {
     setCap(v)
+    setBacktest(null)    // 均衡强度变了→代表基金可能变，旧回测失效
     if (result) run(v)   // 已有结果才即时重算，避免空选预设时误触
   }
 
   const items = result?.items
   const meta = result?.meta
+  const clusterMeta = result?.cluster_meta
   const portfolio = result?.portfolio
   const lookthrough = result?.lookthrough
   const maxWeight = items && items.length ? Math.max(...items.map((i) => i.weight)) : 0
@@ -96,7 +126,12 @@ const PositionView = forwardRef<
         <Button type="primary" icon={<FundOutlined />} loading={loading} onClick={() => run()}>
           生成仓位建议
         </Button>
-        <Tooltip title="单一行业穿透占比上限：松=22%（更接近纯景气，行业更集中），中=18%，紧=14%（更分散，牺牲更多景气权重）。切换会立即重算。">
+        <Tooltip title="固定当前代表基金集合，按月度再平衡做 walk-forward 回测，比较「动量调权 vs 等权」，验证调权这一步是否真的有用。较重，按需运行。">
+          <Button icon={<ExperimentOutlined />} loading={btLoading} onClick={runBacktest}>
+            回测验证
+          </Button>
+        </Tooltip>
+        <Tooltip title="单一行业穿透占比上限：松=22%（更接近纯动量，行业更集中），中=18%，紧=14%（更分散，牺牲更多动量权重）。切换会立即重算。">
           <Segmented
             value={cap}
             disabled={loading}
@@ -112,6 +147,7 @@ const PositionView = forwardRef<
           <span style={{ color: '#888', fontSize: 12 }}>
             {meta.n_clusters} 个赛道 · 等权基准 {(meta.base_weight * 100).toFixed(1)}% · 单行业上限 {(meta.cap * 100).toFixed(0)}%
             {meta.funds_swapped ? ` · ${meta.funds_swapped} 簇为降相关选了次优基金` : ''}
+            {clusterMeta?.share_merged ? ` · 已合并 ${clusterMeta.share_merged} 只 A/C 份额` : ''}
             {meta.nav_missing.length ? ` · ${meta.nav_missing.length} 只缺净值按中性估计` : ''}
           </span>
         )}
@@ -129,13 +165,13 @@ const PositionView = forwardRef<
         <Alert
           type="info"
           showIcon
-          message="每簇从综合分前 5 候选里选 1 只「代表基金」：在保证质量前提下尽量降低底层行业相关性（必要时用次优基金替代 TOP1）。权重 = 景气因子 × 乖离因子的基准，再做行业感知再分配（单一行业穿透占比 ≤ 上限），截断到 [3%, 25%] 后归一到 100%。景气度由代表基金净值四因子估计（top10 持仓口径，单基金代理），仅供参考、非投资建议。"
+          message="每簇从综合分前 5 候选里选 1 只「代表基金」：在保证质量前提下尽量降低底层行业相关性（必要时用次优基金替代 TOP1）。权重 = 动量因子 × 乖离因子的基准，再做行业感知再分配（单一行业穿透占比 ≤ 上限），截断到 [3%, 25%] 后归一到 100%。动量强度（近期净值趋势强度，非基本面景气）由代表基金净值四因子估计（top10 持仓口径、单基金代理），属追涨择时、仅供参考、非投资建议。"
         />
       )}
 
       {loading && (
         <div style={{ textAlign: 'center', padding: 48 }}>
-          <Spin tip="景气度与仓位计算中…" />
+          <Spin tip="动量与仓位计算中…" />
         </div>
       )}
 
@@ -146,6 +182,14 @@ const PositionView = forwardRef<
       {!loading && portfolio && portfolio.curve.length > 0 && (
         <PortfolioCharts portfolio={portfolio} />
       )}
+
+      {btLoading && (
+        <div style={{ textAlign: 'center', padding: 32 }}>
+          <Spin tip="回测计算中（逐调仓点重算权重）…" />
+        </div>
+      )}
+
+      {!btLoading && backtest && <BacktestCard data={backtest} />}
 
       {!loading && lookthrough && lookthrough.stocks.length > 0 && (
         <LookthroughCard

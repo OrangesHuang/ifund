@@ -121,6 +121,7 @@ export interface ClusterMetaBrief {
   total: number
   t: number
   target: number
+  share_merged?: number   // 入口合并的 A/C/E 等同基金多份额数
 }
 
 export interface PortfolioPoint {
@@ -143,5 +144,42 @@ export interface PositionResult {
   lookthrough?: Lookthrough
   meta?: PositionMeta
   cluster_meta?: ClusterMetaBrief
+  reason?: string
+}
+
+// —— walk-forward 回测：动量调权 vs 等权 ——
+export interface BacktestPoint {
+  date: string
+  nav: number   // 从首个调仓点 rebase 到 1.0 的净值
+}
+
+export interface BacktestSeries {
+  curve: BacktestPoint[]
+  annual_return: number
+  annual_vol: number
+  sharpe: number
+  max_drawdown: number
+}
+
+export interface BacktestMeta {
+  start: string
+  end: string
+  n_funds: number
+  n_rebalances: number  // 月度调仓次数
+  step_days: number     // 调仓间隔（交易日）
+  warmup_days: number   // 首调仓点前的预热交易日
+  common_days: number   // 代表基金共同净值交易日数
+}
+
+export interface BacktestResult {
+  strategy: BacktestSeries   // 按动量/乖离调权
+  equal: BacktestSeries      // 等权对照
+  meta: BacktestMeta
+  funds: { code: string; name: string }[]
+  rebalances: { date: string; weights: number[]; prosperity: number[] }[]
+}
+
+export interface BacktestResponse {
+  result: BacktestResult | null
   reason?: string
 }

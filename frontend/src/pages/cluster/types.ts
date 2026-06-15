@@ -67,6 +67,7 @@ export interface ClusterMeta {
   total: number
   t: number
   target: number
+  share_merged?: number   // 入口合并的 A/C/E 等同基金多份额数
 }
 
 export interface ClusterResult {

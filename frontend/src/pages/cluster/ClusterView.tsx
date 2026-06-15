@@ -49,6 +49,7 @@ const ClusterView = forwardRef<
         {meta && (
           <span style={{ color: '#888', fontSize: 12 }}>
             共 {meta.total ?? meta.n} 只基金 · {meta.t} 簇
+            {meta.share_merged ? ` · 已合并 ${meta.share_merged} 只 A/C 同基金份额` : ''}
             {meta.dropped ? ` · 其中 ${meta.dropped} 只无股票持仓归「其他」` : ''}
           </span>
         )}

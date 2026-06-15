@@ -10,7 +10,7 @@ function fmt(v: number | null | undefined, suffix = ''): string {
   return v === null || v === undefined ? '-' : `${Number(v).toFixed(2)}${suffix}`
 }
 
-// 单簇仓位建议行：左=目标权重 | 中=簇/基金/指标/走势图 + 前十大重仓股 | 右=景气四因子（收缩）
+// 单簇仓位建议行：左=目标权重 | 中=簇/基金/指标/走势图 + 前十大重仓股 | 右=动量四因子（收缩）
 // highlightStocks/highlightInds：穿透联动选中的股票/行业，命中的重仓股会高亮。
 export default function PositionRow({
   item,
@@ -40,7 +40,7 @@ export default function PositionRow({
     <div
       style={{
         display: 'flex',
-        flexWrap: 'wrap',   // 窄屏时各栏自动换行，避免景气度条与重仓股重叠
+        flexWrap: 'wrap',   // 窄屏时各栏自动换行，避免动量条与重仓股重叠
         gap: 16,
         padding: '14px 0',
         borderBottom: '1px solid rgba(140,140,140,0.15)',
@@ -183,10 +183,10 @@ export default function PositionRow({
         </div>
       </div>
 
-      {/* 右：景气度（收缩为固定宽度）+ 乖离 + 理由 */}
+      {/* 右：动量强度（收缩为固定宽度）+ 乖离 + 理由 */}
       <div style={{ width: 280, flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontSize: 12, color: '#8c8c8c' }}>景气度</span>
+          <span style={{ fontSize: 12, color: '#8c8c8c' }}>动量强度</span>
           <b style={{ fontSize: 16 }}>{pros.total.toFixed(0)}</b>
           <Tooltip title="当前净值相对 MA20/MA60 的乖离（0.6·d20+0.4·d60），择时参考">
             <span style={{ fontSize: 12, color: '#8c8c8c' }}>· 乖离 {dev.combined.toFixed(1)}%</span>

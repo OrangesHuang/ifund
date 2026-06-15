@@ -162,6 +162,26 @@ def _lookthrough(selected: list[dict], weights_list: list[float],
             "stocks": stocks, "industries": industries}
 
 
+def select_representatives(clusters: list[dict], holdings_by_code: dict[str, list[dict]],
+                           ind_idx: dict, cap: float):
+    """每簇从综合分前 ``optimize.TOPK`` 候选里选 1 只代表基金（行业感知去重）。
+
+    单一出处：``run``（仓位建议）与回测端点都用它，保证「回测的基金集合 = 用户看到的建议」。
+    返回 ``(valid, cands, choice, selected)``：valid=有基金的簇；cands=各簇 TOP{TOPK} 候选
+    （含行业向量 vec）；choice[i]=选中候选下标（0=TOP1）；selected[i]=选中基金（簇内 fund dict）。
+    """
+    valid = [c for c in clusters if c.get("funds")]
+    if not valid:
+        return [], [], [], []
+    cands = [[{"code": f["code"], "name": f["name"], "score": f["score"],
+               "vec": _industry_vector(holdings_by_code.get(f["code"], []), ind_idx)}
+              for f in c["funds"][:optimize.TOPK]]
+             for c in valid]
+    choice = optimize.select_funds(cands, cap)
+    selected = [valid[i]["funds"][choice[i]] for i in range(len(valid))]
+    return valid, cands, choice, selected
+
+
 def run(clusters: list[dict], nav_by_code: dict[str, list[tuple[str, float]]],
         holdings_by_code: dict[str, list[dict]] | None = None,
         detail_by_code: dict[str, dict] | None = None,
@@ -185,13 +205,8 @@ def run(clusters: list[dict], nav_by_code: dict[str, list[tuple[str, float]]],
                                 "visible_position": 0.0, "stocks": [], "industries": []},
                 "meta": {"n_clusters": 0, "base_weight": 0.0, "nav_missing": [], "cap": cap}}
 
-    # 每簇构造 TOP{TOPK} 候选（含行业向量），交给 optimize 选基金
-    cands = [[{"code": f["code"], "name": f["name"], "score": f["score"],
-               "vec": _industry_vector(holdings_by_code.get(f["code"], []), ind_idx)}
-              for f in c["funds"][:optimize.TOPK]]
-             for c in valid]
-    choice = optimize.select_funds(cands, cap)
-    selected = [valid[i]["funds"][choice[i]] for i in range(len(valid))]
+    # 每簇构造 TOP{TOPK} 候选（含行业向量），交给 optimize 选基金（与回测端点同一出处）
+    valid, cands, choice, selected = select_representatives(clusters, holdings_by_code, ind_idx, cap)
 
     dated_list = [nav_by_code.get(f["code"], []) for f in selected]
     series_list = [[nav for _, nav in dated] for dated in dated_list]
