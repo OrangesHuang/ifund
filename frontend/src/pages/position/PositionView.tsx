@@ -7,10 +7,10 @@ import type { PositionResult } from './types'
 
 // ③ 簇级仓位建议视图：对共享预设镜像聚类后，按每簇 TOP1 基金景气度+乖离给出目标权重。
 // presetId 由工作台容器下传；预设变化时自动生成仓位建议。
-const PositionView = forwardRef(function PositionView(
-  { presetId }: { presetId: number | null },
-  ref
-) {
+const PositionView = forwardRef<
+  { run: () => Promise<void> },
+  { presetId: number | null }
+>(function PositionView({ presetId }, ref) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PositionResult | null>(null)
 
@@ -85,3 +85,5 @@ const PositionView = forwardRef(function PositionView(
     </div>
   )
 })
+
+export default PositionView

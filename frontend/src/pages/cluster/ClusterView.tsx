@@ -7,10 +7,10 @@ import type { ClusterResult } from './types'
 
 // ② 行业暴露聚类视图：对共享预设的镜像快照做聚类分析。
 // presetId 由工作台容器下传；预设变化时自动运行聚类。
-const ClusterView = forwardRef(function ClusterView(
-  { presetId }: { presetId: number | null },
-  ref
-) {
+const ClusterView = forwardRef<
+  { run: () => Promise<void> },
+  { presetId: number | null }
+>(function ClusterView({ presetId }, ref) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ClusterResult | null>(null)
 
@@ -94,3 +94,5 @@ const ClusterView = forwardRef(function ClusterView(
     </div>
   )
 })
+
+export default ClusterView
