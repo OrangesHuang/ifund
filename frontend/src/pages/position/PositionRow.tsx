@@ -16,7 +16,6 @@ export default function PositionRow({ item, maxWeight }: { item: PositionItem; m
   const pct = (item.weight * 100).toFixed(1)
   const basePct = (item.base_weight * 100).toFixed(1)
   const rel = item.weight - item.base_weight
-  const industries = item.top_industries.map((i) => i.label).join(' / ') || item.cluster_name
   const noNav = item.nav_points < 60
   const holdings = item.holdings ?? []
 
@@ -64,7 +63,19 @@ export default function PositionRow({ item, maxWeight }: { item: PositionItem; m
       <div style={{ flex: 1, minWidth: 0 }}>
         <div>
           <Tag color="geekblue">簇 {item.cluster_id}</Tag>
-          <span style={{ fontWeight: 600 }}>{industries}</span>
+          <span style={{ fontWeight: 600 }}>
+            {item.top_industries.length
+              ? item.top_industries.map((ind, i) => (
+                  <span key={`${ind.label}-${i}`}>
+                    {i > 0 && <span style={{ color: '#8c8c8c', fontWeight: 400 }}> / </span>}
+                    {ind.label}
+                    <span style={{ color: '#8c8c8c', fontWeight: 400, fontSize: 12, marginLeft: 2 }}>
+                      {ind.ratio.toFixed(1)}%
+                    </span>
+                  </span>
+                ))
+              : item.cluster_name}
+          </span>
         </div>
         <div style={{ fontWeight: 600, marginTop: 6 }}>
           {fund.name}
