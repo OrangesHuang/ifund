@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 
 from app import db as database
@@ -18,12 +18,23 @@ from app.position.algo import pipeline as position_pipeline
 bp = Blueprint("position", __name__, url_prefix="/api/position")
 
 NAV_LOOKBACK = 260      # 取最近约 13 个月净值，够算 6m 动量 / MA60 / 一致性
+CAP_MIN, CAP_MAX = 0.10, 0.30   # 单一行业上限可调区间（前端均衡强度档位）
+
+
+def _resolve_cap() -> float:
+    """从请求体读取均衡强度 cap（单一行业穿透占比上限），缺省/越界回退到默认值。"""
+    body = request.get_json(silent=True) or {}
+    try:
+        cap = float(body.get("cap"))
+    except (TypeError, ValueError):
+        return position_pipeline.optimize.DEFAULT_CAP
+    return min(CAP_MAX, max(CAP_MIN, cap))
 
 
 @bp.post("/run")
 @jwt_required()
 def run():
-    """对预设镜像聚类并算簇级仓位建议。body: ``{"preset_id": int}``。"""
+    """对预设镜像聚类并算簇级仓位建议。body: ``{"preset_id": int, "cap"?: float}``。"""
     items, error = preset_access.resolve_items("items")
     if error:
         payload, status = error
@@ -45,6 +56,7 @@ def run():
         detail = database.select_one("fund_details", {"fund_code": f"eq.{code}"})
         if detail:
             detail_by_code[code] = detail
-    result = position_pipeline.run(clusters, nav_by_code, holdings_by_code, detail_by_code)
+    result = position_pipeline.run(clusters, nav_by_code, holdings_by_code,
+                                   detail_by_code, cap=_resolve_cap())
     result["cluster_meta"] = cluster_result["meta"]
     return jsonify(result)

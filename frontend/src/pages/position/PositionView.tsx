@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } from 'react'
-import { Alert, Button, Card, Empty, Space, Spin, message } from 'antd'
+import { Alert, Button, Card, Empty, Segmented, Space, Spin, Tooltip, message } from 'antd'
 import { FundOutlined } from '@ant-design/icons'
 import request from '../../api/request'
 import PositionRow from './PositionRow'
@@ -15,6 +15,8 @@ const PositionView = forwardRef<
 >(function PositionView({ presetId }, ref) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PositionResult | null>(null)
+  // 均衡强度：单一行业穿透占比上限 cap，越小越分散（牺牲更多景气权重），越大越接近纯景气
+  const [cap, setCap] = useState(0.18)
   // 穿透联动：勾选的股票/行业，用于过滤+高亮下方代表基金
   const [selStocks, setSelStocks] = useState<string[]>([])
   const [selInds, setSelInds] = useState<string[]>([])
@@ -29,7 +31,8 @@ const PositionView = forwardRef<
     clearSel()
   }, [presetId, clearSel])
 
-  const run = useCallback(async () => {
+  // capArg 用于切换均衡强度时立即用新值重算（避免 setCap 异步导致闭包读到旧值）
+  const run = useCallback(async (capArg?: number) => {
     if (!presetId) {
       message.warning('请先在上方选择一个预设')
       return
@@ -38,16 +41,25 @@ const PositionView = forwardRef<
     setResult(null)
     clearSel()
     try {
-      const { data } = await request.post<PositionResult>('/position/run', { preset_id: presetId })
+      const { data } = await request.post<PositionResult>('/position/run', {
+        preset_id: presetId,
+        cap: capArg ?? cap,
+      })
       setResult(data)
     } catch {
       message.error('仓位计算失败')
     } finally {
       setLoading(false)
     }
-  }, [presetId, clearSel])
+  }, [presetId, clearSel, cap])
 
-  useImperativeHandle(ref, () => ({ run }), [run])
+  // 工作台容器在预设变化时通过 ref 触发，用当前均衡强度
+  useImperativeHandle(ref, () => ({ run: () => run() }), [run])
+
+  const onCapChange = (v: number) => {
+    setCap(v)
+    if (result) run(v)   // 已有结果才即时重算，避免空选预设时误触
+  }
 
   const items = result?.items
   const meta = result?.meta
@@ -68,9 +80,21 @@ const PositionView = forwardRef<
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Space wrap>
-        <Button type="primary" icon={<FundOutlined />} loading={loading} onClick={run}>
+        <Button type="primary" icon={<FundOutlined />} loading={loading} onClick={() => run()}>
           生成仓位建议
         </Button>
+        <Tooltip title="单一行业穿透占比上限：松=22%（更接近纯景气，行业更集中），中=18%，紧=14%（更分散，牺牲更多景气权重）。切换会立即重算。">
+          <Segmented
+            value={cap}
+            disabled={loading}
+            onChange={(v) => onCapChange(v as number)}
+            options={[
+              { label: '均衡·松', value: 0.22 },
+              { label: '均衡·中', value: 0.18 },
+              { label: '均衡·紧', value: 0.14 },
+            ]}
+          />
+        </Tooltip>
         {meta && (
           <span style={{ color: '#888', fontSize: 12 }}>
             {meta.n_clusters} 个赛道 · 等权基准 {(meta.base_weight * 100).toFixed(1)}% · 单行业上限 {(meta.cap * 100).toFixed(0)}%
