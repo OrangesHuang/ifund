@@ -50,9 +50,17 @@ export interface LookthroughFundRef {
 export interface LookthroughStock {
   code: string
   name: string
+  industry: string     // 申万行业标签
   exposure: number     // 组合穿透后该股票的实际仓位（%）
   fund_count: number   // 被几只代表基金持有（≥2 即重叠）
   funds: LookthroughFundRef[]
+}
+
+// 行业聚合：组合穿透后各行业的总仓位
+export interface LookthroughIndustry {
+  industry: string
+  exposure: number     // 该行业累计穿透仓位（%）
+  stock_count: number  // 该行业下的不同股票数
 }
 
 export interface Lookthrough {
@@ -61,6 +69,7 @@ export interface Lookthrough {
   overlap_stocks: number   // 被 ≥2 只基金同时持有的股票数
   visible_position: number // 前十大穿透后组合的股票总仓位（%）
   stocks: LookthroughStock[]
+  industries: LookthroughIndustry[]
 }
 
 export interface PositionIndustry {

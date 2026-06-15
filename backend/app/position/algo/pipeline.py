@@ -89,12 +89,12 @@ def _rebase_curve(dated: list[tuple[str, float]]) -> list[dict]:
 
 
 def _lookthrough(valid: list[dict], weights_list: list[float],
-                 holdings_by_code: dict[str, list[dict]]) -> dict:
-    """把各簇代表基金的前十大股票按目标权重穿透累加，看底层实际持有哪些股票。
+                 holdings_by_code: dict[str, list[dict]], ind_idx: dict) -> dict:
+    """把各簇代表基金的前十大股票按目标权重穿透累加，看底层实际持有哪些股票/行业。
 
     组合对某股票的暴露% = ∑(基金目标权重 × 该基金中此股占净值比例)。
     重叠（被 ≥2 只基金持有）越多，说明底层越集中、代表基金相关性越高。
-    仅基于可见的前十大持仓，非完整持仓。
+    再把股票暴露按行业聚合，看组合整体行业占比。仅基于可见的前十大持仓，非完整持仓。
     """
     agg: dict[str, dict] = {}
     covered = 0
@@ -112,6 +112,7 @@ def _lookthrough(valid: list[dict], weights_list: list[float],
             ratio = h.get("hold_ratio") or 0.0
             slot = agg.setdefault(scode, {
                 "code": scode, "name": h.get("asset_name") or scode,
+                "industry": industry_crud.label_of(scode, ind_idx),
                 "exposure": 0.0, "funds": [],
             })
             slot["exposure"] += w * ratio          # w 小数 × 占净值% → 组合中该股 %
@@ -123,8 +124,22 @@ def _lookthrough(valid: list[dict], weights_list: list[float],
         s["fund_count"] = len(s["funds"])
     overlap = sum(1 for s in stocks if s["fund_count"] >= 2)
     visible = round(sum(s["exposure"] for s in stocks), 2)
+
+    # 行业聚合：组合穿透后各行业的总仓位
+    ind_agg: dict[str, dict] = {}
+    for s in stocks:
+        slot = ind_agg.setdefault(s["industry"], {
+            "industry": s["industry"], "exposure": 0.0, "stock_count": 0,
+        })
+        slot["exposure"] += s["exposure"]
+        slot["stock_count"] += 1
+    industries = sorted(ind_agg.values(), key=lambda x: x["exposure"], reverse=True)
+    for x in industries:
+        x["exposure"] = round(x["exposure"], 2)
+
     return {"funds_covered": covered, "total_stocks": len(stocks),
-            "overlap_stocks": overlap, "visible_position": visible, "stocks": stocks}
+            "overlap_stocks": overlap, "visible_position": visible,
+            "stocks": stocks, "industries": industries}
 
 
 def run(clusters: list[dict], nav_by_code: dict[str, list[tuple[str, float]]],
@@ -191,7 +206,7 @@ def run(clusters: list[dict], nav_by_code: dict[str, list[tuple[str, float]]],
     # 按目标权重合成组合净值与回撤走势（rebase 到 1.0 后加权），并算年化/夏普
     curve, max_drawdown = _portfolio_curve(dated_list, target)
     stats = _portfolio_stats(curve)
-    lookthrough = _lookthrough(valid, target, holdings_by_code)
+    lookthrough = _lookthrough(valid, target, holdings_by_code, ind_idx)
 
     return {"items": items,
             "portfolio": {"curve": curve, "max_drawdown": max_drawdown, **stats},
