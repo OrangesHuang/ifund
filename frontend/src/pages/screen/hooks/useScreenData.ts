@@ -14,22 +14,13 @@ export interface Snapshot {
 // 筛选页一次性展示全部命中（非分页），上限保护
 const SCREEN_LIMIT = 500
 
-export function useScreenData() {
-  const [presets, setPresets] = useState<QueryPreset[]>([])
-  const [presetId, setPresetId] = useState<number | null>(null)
+// presetId / presets 由上层（工作台容器）统一管理并下传，本 hook 只负责
+// 在 presetId 变化时拉取「最新筛选结果 + 镜像快照」，并提供刷新/存镜像。
+export function useScreenData(presetId: number | null, presets: QueryPreset[]) {
   const [latest, setLatest] = useState<FundItem[]>([])
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  const loadPresets = useCallback(async () => {
-    try {
-      const { data } = await request.get('/fund/presets')
-      setPresets(data.items ?? data ?? [])
-    } catch {
-      /* 忽略 */
-    }
-  }, [])
 
   // 用预设条件实时筛选（复用 /fund/list）
   const runScreen = useCallback(async (preset: QueryPreset) => {
@@ -49,27 +40,24 @@ export function useScreenData() {
     setSnapshot(data.snapshot ?? null)
   }, [])
 
-  const selectPreset = useCallback(
-    async (id: number) => {
-      setPresetId(id)
-      const preset = presets.find((p) => p.id === id)
-      if (!preset) return
-      setLoading(true)
-      try {
-        const [items] = await Promise.all([runScreen(preset), loadSnapshot(id)])
-        setLatest(items)
-      } catch {
-        message.error('筛选失败')
-      } finally {
-        setLoading(false)
-      }
-    },
-    [presets, runScreen, loadSnapshot],
-  )
-
-  const refresh = useCallback(() => {
-    if (presetId != null) selectPreset(presetId)
-  }, [presetId, selectPreset])
+  const load = useCallback(async () => {
+    if (presetId == null) {
+      setLatest([])
+      setSnapshot(null)
+      return
+    }
+    const preset = presets.find((p) => p.id === presetId)
+    if (!preset) return
+    setLoading(true)
+    try {
+      const [items] = await Promise.all([runScreen(preset), loadSnapshot(presetId)])
+      setLatest(items)
+    } catch {
+      message.error('筛选失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [presetId, presets, runScreen, loadSnapshot])
 
   // 把当前最新筛选结果存为该预设的镜像
   const saveMirror = useCallback(async () => {
@@ -93,8 +81,8 @@ export function useScreenData() {
   }, [presetId, latest, loadSnapshot])
 
   useEffect(() => {
-    loadPresets()
-  }, [loadPresets])
+    load()
+  }, [load])
 
-  return { presets, presetId, latest, snapshot, loading, saving, selectPreset, refresh, saveMirror }
+  return { latest, snapshot, loading, saving, refresh: load, saveMirror }
 }

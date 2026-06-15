@@ -95,7 +95,8 @@ def _conds_to_conditions(conds: list[str]) -> list[dict]:
 
 
 def _build_list_params(keyword: str, name_contains: str, fund_types: list[str],
-                       conds: list[str]) -> dict[str, str]:
+                       conds: list[str],
+                       name_excludes: list[str] | None = None) -> dict[str, str]:
     """把筛选入参拼成 /fund/list 的 query 参数。"""
     params: dict[str, str] = {}
     if keyword:
@@ -106,6 +107,8 @@ def _build_list_params(keyword: str, name_contains: str, fund_types: list[str],
         params["fund_types"] = ",".join(fund_types)
     if conds:
         params["conds"] = ",".join(conds)
+    if name_excludes:
+        params["name_excludes"] = ",".join(name_excludes)
     return params
 
 
@@ -127,23 +130,30 @@ def search_funds(keyword: str, limit: int = 20) -> Any:
 def screen_funds(keyword: str = "", name_contains: str = "",
                  fund_types: list[str] | None = None,
                  conds: list[str] | None = None,
+                 name_excludes: list[str] | None = None,
                  order_by: str = "", limit: int = 50,
-                 with_nav: bool = False) -> Any:
+                 with_nav: bool = False,
+                 with_holdings: bool = False) -> Any:
     """按条件筛选基金并返回带详情指标的列表。
 
     keyword: 代码/名称关键词；name_contains: 名称包含；fund_types: 基金分类列表；
     conds: 数值条件列表，元素形如 ``"sharpe_3y:gte:1"``（字段:操作符:值，
     操作符 gt/gte/lt/lte/eq/neq；可用字段含 scale/return_ytd/sharpe_3y/sharpe_1y/
     drawdown_3y/drawdown_1y/max_drawdown_3y/max_drawdown_1y/position_stock 等）；
-    order_by: 排序，形如 ``"scale:desc"``；limit: 返回条数；with_nav: 是否附带净值序列。
+    name_excludes: 名称排除关键词列表；
+    order_by: 排序，形如 ``"scale:desc"``；limit: 返回条数；
+    with_nav: 是否附带净值序列；with_holdings: 是否附带前十大持仓。
     """
-    params = _build_list_params(keyword, name_contains, fund_types or [], conds or [])
+    params = _build_list_params(keyword, name_contains, fund_types or [],
+                                conds or [], name_excludes)
     params["skip"] = "0"
     params["limit"] = str(limit)
     if order_by:
         params["order_by"] = order_by
     if with_nav:
         params["attach_nav"] = "1"
+    if with_holdings:
+        params["attach_holdings"] = "1"
     return _call("GET", "/api/fund/list", params=params)
 
 
@@ -187,15 +197,84 @@ def get_snapshot(preset_id: int) -> Any:
     return _call("GET", f"/api/fund/presets/{preset_id}/snapshot")
 
 
+@mcp.tool()
+def run_clustering(preset_id: int) -> Any:
+    """对某预设的镜像快照做行业暴露聚类分析（按持仓把口味相近的基金聚成簇）。
+
+    需先用 ``save_snapshot`` 为该预设保存镜像。每个簇返回三层股票视角：
+    行业暴露（占比平权）、实际资金暴露（规模加权的重仓市值）、代表股票（含重叠基金数），
+    以及簇内基金（按临时综合分降序，附前十大持仓与申万三级）。
+    无镜像或可聚类基金 < 3 时返回 ``{"clusters": null, "reason": ...}``。
+
+    preset_id: 预设 id。
+    """
+    return _call("POST", "/api/cluster/run", json_body={"preset_id": preset_id})
+
+
+@mcp.tool()
+def run_position(preset_id: int) -> Any:
+    """基于预设镜像的聚类结果，给出簇级仓位建议（③：每簇只配综合分第一的代表基金）。
+
+    对每簇 TOP1 基金用其净值估计景气度（动量/风险调整/广度/一致性四因子）与乖离度，
+    合成目标权重（等权基准 × 景气因子 × 乖离因子 → 截断 [3%,25%] → 归一到 100%），
+    并给出加码/标配/减码推荐与理由。无镜像或可聚类基金 < 3 时返回 ``{"items": null, "reason": ...}``。
+
+    preset_id: 预设 id。
+    """
+    return _call("POST", "/api/position/run", json_body={"preset_id": preset_id})
+
+
+@mcp.tool()
+def get_industry_coverage() -> Any:
+    """股票→行业映射的覆盖率统计（聚类标签基础）。
+
+    分 A股/港股/海外统计申万三级与东财行业的覆盖数量与比例，含申万三级行业总数。
+    """
+    return _call("GET", "/api/stock_industry/stats")
+
+
+@mcp.tool()
+def list_industry_breakdown(top: int = 0) -> Any:
+    """持仓股票按聚类标签（申万三级为主）聚合计数，降序返回各细分行业的标的数量。
+
+    top: 仅返回前 N 个行业（0=全部）。
+    """
+    params = {"top": str(top)} if top else None
+    return _call("GET", "/api/stock_industry/breakdown", params=params)
+
+
+@mcp.tool()
+def list_stock_industry(market: str = "", label: str = "", status: str = "",
+                        keyword: str = "", page: int = 1, page_size: int = 50) -> Any:
+    """分页查询持仓股票的行业映射明细（代码/名称/市场/申万一二三级/东财行业）。
+
+    market: ``A`` / ``HK`` / ``OTHER``；label: 行业名关键词；
+    status: ``covered`` 仅已覆盖 / ``uncovered`` 仅未覆盖 / 空=全部；
+    keyword: 股票代码或名称片段；page/page_size: 分页（page_size 上限 500）。
+    """
+    params = {"page": str(page), "page_size": str(page_size)}
+    if market:
+        params["market"] = market
+    if label:
+        params["label"] = label
+    if status:
+        params["status"] = status
+    if keyword:
+        params["keyword"] = keyword
+    return _call("GET", "/api/stock_industry/list", params=params)
+
+
 # ---------------------------------------------------------------- 写入工具
 
 @mcp.tool()
 def create_preset(name: str, keyword: str = "", name_contains: str = "",
                   fund_types: list[str] | None = None,
-                  conds: list[str] | None = None) -> Any:
+                  conds: list[str] | None = None,
+                  name_excludes: list[str] | None = None) -> Any:
     """新建（或按同名覆盖）一个筛选预设。
 
     name: 预设名；其余参数同 screen_funds 的筛选条件，将一并保存。
+    name_excludes: 名称排除关键词列表。
     """
     filters: dict[str, Any] = {}
     if keyword:
@@ -204,6 +283,8 @@ def create_preset(name: str, keyword: str = "", name_contains: str = "",
         filters["name_contains"] = name_contains
     if fund_types:
         filters["fund_types"] = fund_types
+    if name_excludes:
+        filters["name_excludes"] = name_excludes
     conditions = _conds_to_conditions(conds or [])
     if conditions:
         filters["conditions"] = conditions
@@ -220,9 +301,45 @@ def delete_preset(preset_id: int) -> Any:
 
 
 @mcp.tool()
+def update_preset(preset_id: int, name: str = "", keyword: str = "",
+                  name_contains: str = "", fund_types: list[str] | None = None,
+                  conds: list[str] | None = None,
+                  name_excludes: list[str] | None = None,
+                  replace_filters: bool = False) -> Any:
+    """更新一个筛选预设的名称和/或筛选条件（仅本人）。
+
+    name: 非空则改名；其余筛选参数同 create_preset。
+    name_excludes: 名称排除关键词列表。
+    replace_filters: 默认 False 时只改名、不动既有筛选条件；置 True 时用传入的筛选参数
+    **整体替换** filters（未传的筛选参数视为清空）。仅改名场景保持 False 即可。
+    """
+    body: dict[str, Any] = {}
+    if name:
+        body["name"] = name
+    if replace_filters:
+        filters: dict[str, Any] = {}
+        if keyword:
+            filters["keyword"] = keyword
+        if name_contains:
+            filters["name_contains"] = name_contains
+        if fund_types:
+            filters["fund_types"] = fund_types
+        if name_excludes:
+            filters["name_excludes"] = name_excludes
+        conditions = _conds_to_conditions(conds or [])
+        if conditions:
+            filters["conditions"] = conditions
+        body["filters"] = filters
+    if not body:
+        return {"_error": 400, "detail": "未提供 name，且 replace_filters=False，无可更新内容"}
+    return _call("PUT", f"/api/fund/presets/{preset_id}", json_body=body)
+
+
+@mcp.tool()
 def save_snapshot(preset_id: int, limit: int = 500) -> Any:
     """按预设当前条件重新筛选，并把结果存为该预设的镜像快照（替换旧镜像）。
 
+    会自动附带前十大持仓数据（attach_holdings=1），确保镜像可用于聚类分析。
     preset_id: 预设 id；limit: 最多镜像多少只基金。
     """
     presets = _call("GET", "/api/fund/presets")
@@ -236,9 +353,11 @@ def save_snapshot(preset_id: int, limit: int = 500) -> Any:
         filters.get("keyword", ""), filters.get("name_contains", ""),
         filters.get("fund_types") or [],
         [f"{c['field']}:{c['op']}:{c['value']}" for c in filters.get("conditions") or []],
+        filters.get("name_excludes") or [],
     )
     params["skip"] = "0"
     params["limit"] = str(limit)
+    params["attach_holdings"] = "1"
     result = _call("GET", "/api/fund/list", params=params)
     if not isinstance(result, dict) or "items" not in result:
         return result

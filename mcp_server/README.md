@@ -46,10 +46,16 @@
 - `get_trade_calendar(year)` — 交易日历
 - `list_presets()` — 当前用户的筛选预设
 - `get_snapshot(preset_id)` — 预设的镜像快照
+- `run_clustering(preset_id)` — 对预设镜像做行业暴露聚类（行业暴露 / 实际资金暴露 / 代表股票 + 簇内基金）
+- `run_position(preset_id)` — 簇级仓位建议（每簇 TOP1 基金景气度+乖离 → 目标权重 ∑=100% + 加/减/标配推荐）
+- `get_industry_coverage()` — 股票→行业映射覆盖率统计
+- `list_industry_breakdown(top)` — 持仓按聚类标签（申万三级）聚合计数
+- `list_stock_industry(market, label, status, keyword, page, page_size)` — 分页查询股票行业映射明细
 
 写入：
 
 - `create_preset(name, ...)` — 新建/覆盖预设
+- `update_preset(preset_id, name, ..., replace_filters)` — 改名 / 替换筛选条件（`replace_filters=True` 时整体替换 filters）
 - `delete_preset(preset_id)` — 删除预设
 - `save_snapshot(preset_id, limit)` — 按预设重新筛选并存镜像
 - `fetch_fund_data(module, ...)` — **会写库**，发起详情/持仓/净值拉取任务（同类任务互斥，已有运行中返回 409）

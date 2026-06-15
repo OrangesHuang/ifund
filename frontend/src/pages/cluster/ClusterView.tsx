@@ -1,28 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Card, Collapse, Empty, Select, Space, Spin, Tag, message } from 'antd'
+import { Alert, Button, Collapse, Empty, Space, Spin, Tag, message } from 'antd'
 import { ClusterOutlined } from '@ant-design/icons'
 import request from '../../api/request'
-import type { QueryPreset } from '../fund/types'
 import ClusterCard from './ClusterCard'
 import type { ClusterResult } from './types'
 
-// ② 行业暴露聚类：对某预设的镜像快照做聚类分析
-export default function ClusterPage() {
-  const [presets, setPresets] = useState<QueryPreset[]>([])
-  const [presetId, setPresetId] = useState<number | null>(null)
+// ② 行业暴露聚类视图：对共享预设的镜像快照做聚类分析。
+// presetId 由工作台容器下传；预设变化时清空旧结果，需手动点「运行聚类」。
+export default function ClusterView({ presetId }: { presetId: number | null }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ClusterResult | null>(null)
 
   useEffect(() => {
-    request
-      .get('/fund/presets')
-      .then(({ data }) => setPresets(data.items ?? data ?? []))
-      .catch(() => undefined)
-  }, [])
+    setResult(null)
+  }, [presetId])
 
   const run = useCallback(async () => {
     if (!presetId) {
-      message.warning('请先选择一个预设')
+      message.warning('请先在上方选择一个预设')
       return
     }
     setLoading(true)
@@ -42,26 +37,17 @@ export default function ClusterPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Card>
-        <Space wrap>
-          <Select
-            style={{ width: 260 }}
-            placeholder="选择预设（镜像基金来源）"
-            value={presetId ?? undefined}
-            onChange={setPresetId}
-            options={presets.map((p) => ({ label: p.name, value: p.id }))}
-          />
-          <Button type="primary" icon={<ClusterOutlined />} loading={loading} onClick={run}>
-            运行聚类
-          </Button>
-          {meta && (
-            <span style={{ color: '#888', fontSize: 12 }}>
-              共 {meta.total ?? meta.n} 只基金 · {meta.t} 簇
-              {meta.dropped ? ` · 其中 ${meta.dropped} 只无股票持仓归「其他」` : ''}
-            </span>
-          )}
-        </Space>
-      </Card>
+      <Space wrap>
+        <Button type="primary" icon={<ClusterOutlined />} loading={loading} onClick={run}>
+          运行聚类
+        </Button>
+        {meta && (
+          <span style={{ color: '#888', fontSize: 12 }}>
+            共 {meta.total ?? meta.n} 只基金 · {meta.t} 簇
+            {meta.dropped ? ` · 其中 ${meta.dropped} 只无股票持仓归「其他」` : ''}
+          </span>
+        )}
+      </Space>
 
       {loading && (
         <div style={{ textAlign: 'center', padding: 48 }}>
@@ -99,7 +85,7 @@ export default function ClusterPage() {
         />
       )}
 
-      {!loading && !result && <Empty description="选择预设后运行聚类" />}
+      {!loading && !result && <Empty description="点「运行聚类」分析该预设镜像" />}
     </div>
   )
 }
