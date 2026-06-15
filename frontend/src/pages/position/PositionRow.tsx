@@ -40,6 +40,7 @@ export default function PositionRow({
     <div
       style={{
         display: 'flex',
+        flexWrap: 'wrap',   // 窄屏时各栏自动换行，避免景气度条与重仓股重叠
         gap: 16,
         padding: '14px 0',
         borderBottom: '1px solid rgba(140,140,140,0.15)',
@@ -71,7 +72,7 @@ export default function PositionRow({
       </div>
 
       {/* 中：簇 + 代表基金 + 指标 + 走势图 + 前十大重仓股 */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: '1 1 460px', minWidth: 320 }}>
         <div>
           <Tag color="geekblue">簇 {item.cluster_id}</Tag>
           <span style={{ fontWeight: 600 }}>
@@ -100,9 +101,9 @@ export default function PositionRow({
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 24, marginTop: 6, alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, marginTop: 6, alignItems: 'flex-start' }}>
           {/* 左块：指标 + 迷你走势图 */}
-          <div style={{ width: 430, flexShrink: 0 }}>
+          <div style={{ flex: '1 1 320px', maxWidth: 430 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
               {metric('Sharpe3y', fmt(fund.sharpe_3y), fund.sharpe_3y && fund.sharpe_3y >= 1 ? '#f5222d' : undefined)}
               {metric('Sharpe1y', fmt(fund.sharpe_1y))}
@@ -124,7 +125,7 @@ export default function PositionRow({
             {holdings.length === 0 ? (
               <span style={{ fontSize: 12, color: '#8c8c8c' }}>暂无持仓数据</span>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 20, rowGap: 1 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', columnGap: 20, rowGap: 1 }}>
                 {holdings.map((h, i) => {
                   const hitStock = highlightStocks?.has(h.code) ?? false
                   const hitInd = highlightInds?.has(h.industry) ?? false

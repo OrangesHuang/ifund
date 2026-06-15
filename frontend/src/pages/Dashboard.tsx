@@ -20,6 +20,7 @@ const { Header, Sider, Content } = Layout
 export default function Dashboard() {
   const navigate = useNavigate()
   const [selected, setSelected] = useState('fund')
+  const [collapsed, setCollapsed] = useState(false)
 
   const logout = () => {
     localStorage.removeItem('token')
@@ -32,15 +33,22 @@ export default function Dashboard() {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Header className="flex items-center justify-between" style={{ paddingInline: 16 }}>
+    // 固定视口高度：仅内容区滚动，Header/侧边栏不随滚动移动
+    <Layout style={{ height: '100vh' }}>
+      <Header className="flex items-center justify-between" style={{ paddingInline: 16, flexShrink: 0 }}>
         <span style={{ color: '#fff', fontSize: 18, fontWeight: 600 }}>iFund</span>
         <Button icon={<LogoutOutlined />} onClick={logout} ghost size="small">
           退出
         </Button>
       </Header>
       <Layout>
-        <Sider width={160} theme="dark">
+        <Sider
+          width={160}
+          theme="dark"
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+        >
           <Menu
             mode="inline"
             theme="dark"
