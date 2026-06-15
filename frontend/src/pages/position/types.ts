@@ -62,6 +62,8 @@ export interface ClusterMetaBrief {
 
 export interface PositionResult {
   items: PositionItem[] | null
+  portfolio_nav?: number[]
+  max_drawdown?: number
   meta?: PositionMeta
   cluster_meta?: ClusterMetaBrief
   reason?: string

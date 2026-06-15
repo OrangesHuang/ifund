@@ -3,6 +3,7 @@ import { Alert, Button, Card, Empty, Space, Spin, message } from 'antd'
 import { FundOutlined } from '@ant-design/icons'
 import request from '../../api/request'
 import PositionRow from './PositionRow'
+import PortfolioCharts from './PortfolioCharts'
 import type { PositionResult } from './types'
 
 // ③ 簇级仓位建议视图：对共享预设镜像聚类后，按每簇 TOP1 基金景气度+乖离给出目标权重。
@@ -39,6 +40,8 @@ const PositionView = forwardRef<
 
   const items = result?.items
   const meta = result?.meta
+  const portfolioNav = result?.portfolio_nav
+  const maxDrawdown = result?.max_drawdown ?? 0
   const maxWeight = items && items.length ? Math.max(...items.map((i) => i.weight)) : 0
 
   return (
@@ -73,8 +76,12 @@ const PositionView = forwardRef<
         <Alert type="info" showIcon message={result.reason ?? '无法计算'} />
       )}
 
+      {!loading && portfolioNav && portfolioNav.length > 0 && (
+        <PortfolioCharts portfolioNav={portfolioNav} maxDrawdown={maxDrawdown} />
+      )}
+
       {!loading && items && items.length > 0 && (
-        <Card>
+        <Card title="各赛道仓位建议" size="small">
           {items.map((it) => (
             <PositionRow key={it.cluster_id} item={it} maxWeight={maxWeight} />
           ))}
