@@ -8,9 +8,11 @@ import {
   FundOutlined,
   KeyOutlined,
   LogoutOutlined,
+  WalletOutlined,
 } from '@ant-design/icons'
 import { FundPage } from './fund'
 import WorkbenchPage from './workbench/WorkbenchPage'
+import HoldingsPage from './reconcile/HoldingsPage'
 import IndustryPage from './IndustryPage'
 import TokensPage from './TokensPage'
 import TradeCalendar from './TradeCalendar'
@@ -57,6 +59,7 @@ export default function Dashboard() {
             items={[
               { key: 'fund', icon: <FundOutlined />, label: '基金管理' },
               { key: 'workbench', icon: <DeploymentUnitOutlined />, label: '组合分析' },
+              { key: 'holdings', icon: <WalletOutlined />, label: '实盘持仓' },
               { key: 'trade_calendar', icon: <CalendarOutlined />, label: '交易日历' },
               { key: 'industry', icon: <ApartmentOutlined />, label: '行业映射' },
               { key: 'tokens', icon: <KeyOutlined />, label: '访问令牌' },
@@ -67,6 +70,7 @@ export default function Dashboard() {
           <Routes>
             <Route path="/" element={<FundPage />} />
             <Route path="/workbench" element={<WorkbenchPage />} />
+            <Route path="/holdings" element={<HoldingsPage />} />
             <Route path="/trade_calendar" element={<TradeCalendar />} />
             <Route path="/industry" element={<IndustryPage />} />
             <Route path="/tokens" element={<TokensPage />} />
