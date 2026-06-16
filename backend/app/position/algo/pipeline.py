@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.position.algo import deviation, optimize, prosperity, recommend, weights
+from app.position.algo import deviation, optimize, prosperity, recommend
 from app.stock_industry.crud import industry_crud
 
-MIN_NAV_POINTS = 60      # 低于此点数视为净值不足（景气度会退化为中性）
+MIN_NAV_POINTS = 60      # 低于此点数视为净值不足（动量强度会退化为中性）
 RISK_FREE_ANNUAL = 0.0   # 夏普比率的无风险利率（简化为 0，即「收益/波动」口径）
 
 
@@ -191,8 +191,8 @@ def run(clusters: list[dict], nav_by_code: dict[str, list[tuple[str, float]]],
     nav_by_code：code→``(trade_date, 累计净值)`` 升序；holdings_by_code：code→前十大股票持仓；
     detail_by_code：code→fund_details 行（补回撤/夏普）。cap：单一行业穿透占比上限（均衡强度）。
 
-    流程：每簇从综合分前 ``optimize.TOPK`` 候选里选 1 只（行业去重），对选中基金算景气度+乖离
-    得基准权重，再做行业感知再分配（上限 cap）。返回 ``{"items","portfolio","lookthrough","meta"}``，
+    流程：每簇从综合分前 ``optimize.TOPK`` 候选里选 1 只（行业去重），以等权（1/N）为基准，
+    再做行业感知再分配（上限 cap）降相关。返回 ``{"items","portfolio","lookthrough","meta"}``，
     items 按目标权重降序；每项 fund 含 ``cluster_rank``（1=TOP1）标注是否替代了 TOP1。
     """
     holdings_by_code = holdings_by_code or {}
@@ -211,14 +211,16 @@ def run(clusters: list[dict], nav_by_code: dict[str, list[tuple[str, float]]],
     dated_list = [nav_by_code.get(f["code"], []) for f in selected]
     series_list = [[nav for _, nav in dated] for dated in dated_list]
 
+    # 动量强度 + 乖离：walk-forward 回测显示动量调权略跑输等权，故不再参与调权，
+    # 仅作每簇的观察指标随建议一并展示（追涨择时、仅供参考）。
     pros = prosperity.compute(series_list)
     devs = [deviation.deviation(s) for s in series_list]
-    base_weights = weights.target_weights([p["total"] for p in pros], devs)
-    # 行业感知再分配：贴近景气基准，仅为把最大单一行业占比压到 ≤ cap 做最小调整
-    # （景气已编码在 base_weights，不再二次最大化，避免权重过度集中到少数簇）
+    # 权重回归等权基准（1/N）；再做行业感知再分配，仅为把最大单一行业穿透占比压到
+    # ≤ cap 做最小调整（降相关），故各簇权重在等权附近，只因行业拥挤度被微调。
+    base = round(1.0 / len(valid), 4)
+    base_weights = [1.0 / len(valid)] * len(valid)
     vecs = [cands[i][choice[i]]["vec"] for i in range(len(valid))]
     target = optimize.rebalance_weights(base_weights, vecs, cap)
-    base = round(1.0 / len(valid), 4)
 
     items, missing = [], []
     for i, cluster in enumerate(valid):

@@ -126,7 +126,7 @@ const PositionView = forwardRef<
         <Button type="primary" icon={<FundOutlined />} loading={loading} onClick={() => run()}>
           生成仓位建议
         </Button>
-        <Tooltip title="固定当前代表基金集合，按月度再平衡做 walk-forward 回测，比较「动量调权 vs 等权」，验证调权这一步是否真的有用。较重，按需运行。">
+        <Tooltip title="回顾验证：固定当前代表基金集合，按月度再平衡做 walk-forward 回测，比较「动量调权 vs 等权」。正是这一步验证出动量调权略跑输等权，系统才改用等权基准。较重，按需运行。">
           <Button icon={<ExperimentOutlined />} loading={btLoading} onClick={runBacktest}>
             回测验证
           </Button>
@@ -165,7 +165,7 @@ const PositionView = forwardRef<
         <Alert
           type="info"
           showIcon
-          message="每簇从综合分前 5 候选里选 1 只「代表基金」：在保证质量前提下尽量降低底层行业相关性（必要时用次优基金替代 TOP1）。权重 = 动量因子 × 乖离因子的基准，再做行业感知再分配（单一行业穿透占比 ≤ 上限），截断到 [3%, 25%] 后归一到 100%。动量强度（近期净值趋势强度，非基本面景气）由代表基金净值四因子估计（top10 持仓口径、单基金代理），属追涨择时、仅供参考、非投资建议。"
+          message="每簇从综合分前 5 候选里选 1 只「代表基金」：在保证质量前提下尽量降低底层行业相关性（必要时用次优基金替代 TOP1）。权重以等权（1/赛道数）为基准，再做行业感知再分配（把单一行业穿透占比压到 ≤ 上限）降相关——故各赛道权重在等权附近，仅因底层行业拥挤度被微调。动量强度（近期净值趋势强度，非基本面景气）经回测验证略跑输等权，已不参与调权，仅作观察指标随建议展示；属追涨择时、仅供参考、非投资建议。"
         />
       )}
 
