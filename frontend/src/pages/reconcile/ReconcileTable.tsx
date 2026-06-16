@@ -1,6 +1,6 @@
 import { Button, Card, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import { CopyOutlined } from '@ant-design/icons'
-import type { ReconAction, ReconMatch, ReconRow } from './types'
+import type { ReconAction, ReconMatch, ReconRow, ReconUserFund } from './types'
 
 const BUY = '#fa541c'   // 建仓/加仓（补）
 const SELL = '#8c8c8c'  // 减仓/清仓（减）
@@ -26,6 +26,76 @@ const MATCH_LABEL: Record<Exclude<ReconMatch, null>, string> = {
 }
 
 const yuan = (v: number) => Math.abs(v).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+
+const MATCH_COLOR = (m: Exclude<ReconMatch, null>) =>
+  m === 'exact' || m === 'name' ? 'green' : m === 'similar' ? 'gold' : 'default'
+
+// 展开行：该赛道归类到的全部持仓明细（当前市值=这些之和），解释聚合口径。
+function ClusterFunds({ row }: { row: ReconRow }) {
+  const funds = row.user_funds
+  return (
+    <div style={{ padding: '4px 0 4px 24px' }}>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        本赛道归类到 {funds.length} 只持仓，合计 {yuan(row.actual)} 元（即左侧「当前市值」）：
+      </Typography.Text>
+      <Table<ReconUserFund>
+        size="small"
+        style={{ marginTop: 6 }}
+        rowKey={(f) => f.code}
+        dataSource={funds}
+        pagination={false}
+        columns={[
+          {
+            title: '基金',
+            render: (_, f) => (
+              <span>
+                {f.name}{' '}
+                <span style={{ fontFamily: 'monospace', color: '#999' }}>{f.code}</span>
+              </span>
+            ),
+          },
+          {
+            title: '市值',
+            dataIndex: 'market_value',
+            width: 120,
+            align: 'right',
+            render: (v: number) => `${yuan(v)} 元`,
+          },
+          {
+            title: '占本赛道',
+            width: 90,
+            align: 'right',
+            render: (_, f) =>
+              row.actual > 0 ? `${((f.market_value / row.actual) * 100).toFixed(0)}%` : '—',
+          },
+          {
+            title: '盈亏',
+            dataIndex: 'pnl',
+            width: 110,
+            align: 'right',
+            render: (v: number | null | undefined) => {
+              if (v === null || v === undefined) return <Typography.Text type="secondary">—</Typography.Text>
+              const color = v > 0 ? '#f5222d' : v < 0 ? '#52c41a' : undefined
+              return <span style={{ color }}>{v > 0 ? '+' : ''}{yuan(v)}</span>
+            },
+          },
+          {
+            title: '匹配',
+            dataIndex: 'match',
+            width: 100,
+            align: 'center',
+            render: (m: Exclude<ReconMatch, null>, f) => {
+              const tag = <Tag color={MATCH_COLOR(m)}>{MATCH_LABEL[m]}</Tag>
+              return m === 'similar'
+                ? <Tooltip title={`行业相似度 ${f.sim ?? '—'}（勉强归类，请核对）`}>{tag}</Tooltip>
+                : tag
+            },
+          },
+        ]}
+      />
+    </div>
+  )
+}
 
 // 对账结果表：每行一个目标赛道（或一只赛道外基金），给出加/减/建/清的金额与操作标的。
 export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
@@ -63,6 +133,10 @@ export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
         rowKey={(r) => `${r.cluster_id ?? 'out'}-${r.target_fund.code}`}
         dataSource={rows}
         pagination={false}
+        expandable={{
+          rowExpandable: (r) => r.user_funds.length > 0,
+          expandedRowRender: (r) => <ClusterFunds row={r} />,
+        }}
         columns={[
           {
             title: '赛道',
@@ -71,11 +145,22 @@ export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
               r.cluster_id === null ? <Tag color="default">赛道外</Tag> : <span>{v}</span>,
           },
           {
-            title: '当前市值',
+            title: (
+              <Tooltip title="按赛道（聚类簇）汇总：归到同一赛道的多只持仓市值之和。点行首 ▸ 展开看构成。">
+                <span>当前市值 ⓘ</span>
+              </Tooltip>
+            ),
             dataIndex: 'actual',
-            width: 120,
+            width: 130,
             align: 'right',
-            render: (v: number) => `${yuan(v)} 元`,
+            render: (v: number, r) => (
+              <Space size={4} direction="vertical" style={{ lineHeight: 1.2 }}>
+                <span>{yuan(v)} 元</span>
+                {r.user_funds.length > 1 && (
+                  <span style={{ fontSize: 11, color: '#999' }}>{r.user_funds.length} 只合计</span>
+                )}
+              </Space>
+            ),
           },
           {
             title: '目标市值',
