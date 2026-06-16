@@ -145,6 +145,9 @@ CREATE TABLE IF NOT EXISTS fund_holdings (
 );
 CREATE INDEX IF NOT EXISTS ix_fund_holdings_fund_code ON fund_holdings (fund_code);
 CREATE INDEX IF NOT EXISTS ix_fund_holdings_quarter ON fund_holdings (quarter);
+-- 覆盖索引：行业映射页按 (holding_type, asset_code) 去重持仓股票，带上 asset_name 可全程走索引，
+-- 免去对 180 万行 fund_holdings 的全表扫 + 临时 B-tree 去重（held_codes / list_page 下沉 JOIN 用）。
+CREATE INDEX IF NOT EXISTS ix_fund_holdings_ht_ac ON fund_holdings (holding_type, asset_code, asset_name);
 
 CREATE TABLE IF NOT EXISTS fund_nav (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,9 +208,30 @@ CREATE TABLE IF NOT EXISTS user_holdings (
     user_id INTEGER NOT NULL,               -- 冗余，便于隔离/查询
     fund_code TEXT NOT NULL,
     fund_name TEXT DEFAULT '',
-    market_value REAL NOT NULL DEFAULT 0,   -- 当前市值（元）
-    cost REAL,                              -- 持仓成本（元）；NULL=未提供。盈亏=市值−成本，仅展示不参与调仓决策
+    market_value REAL NOT NULL DEFAULT 0,   -- 初始化快照市值（元）
+    cost REAL,                              -- 快照成本（元）= 快照市值 − 持有盈亏；NULL=未提供。盈亏仅展示不参与调仓决策
+    base_shares REAL,                       -- 快照派生份额 = 快照市值 ÷ 基准日单位净值；NULL=无净值，退化为静态金额口径
+    base_date TEXT,                         -- 快照基准净值日（派生 base_shares 用的那个交易日）
     updated_at TEXT DEFAULT (datetime('now')),
     UNIQUE (portfolio_id, fund_code)
 );
 CREATE INDEX IF NOT EXISTS ix_user_holdings_portfolio ON user_holdings (portfolio_id);
+
+-- 实盘交易记录：初始化快照之后的加/减/转仓，按基金原则记账（金额 + 当日单位净值 → 份额）。
+-- 持仓的实际市值/盈亏 = 快照(user_holdings) + 交易回放(本表) 合成而来（见 holdings_compute）。
+CREATE TABLE IF NOT EXISTS holding_txns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL,          -- 所属实盘
+    user_id INTEGER NOT NULL,               -- 冗余，便于隔离/查询
+    fund_code TEXT NOT NULL,
+    fund_name TEXT DEFAULT '',
+    txn_type TEXT NOT NULL,                 -- buy=买入/加仓 | sell=卖出/减仓（转仓拆成一买一卖）
+    trade_date TEXT NOT NULL,               -- 交易日 YYYY-MM-DD
+    amount REAL NOT NULL,                   -- 申购/赎回金额（元）
+    nav REAL,                               -- 落账时锁定的当日单位净值；NULL=查不到净值（估值不可用）
+    shares REAL,                            -- 折算份额 = amount ÷ nav，落账时算好存档
+    transfer_id TEXT,                       -- 转仓的一买一卖共享同一标识；NULL=普通加减仓
+    note TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_holding_txns_pf ON holding_txns (portfolio_id, fund_code, trade_date);

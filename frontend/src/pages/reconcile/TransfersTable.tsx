@@ -1,5 +1,7 @@
-import { Button, Card, Table, Tag, Typography, message } from 'antd'
-import { CopyOutlined } from '@ant-design/icons'
+import { useState } from 'react'
+import { Button, Card, Popconfirm, Space, Table, Tag, Typography, message } from 'antd'
+import { CopyOutlined, SaveOutlined } from '@ant-design/icons'
+import request from '../../api/request'
 import type { ReconTransfer } from './types'
 
 const yuan = (v: number) => v.toLocaleString('zh-CN', { maximumFractionDigits: 0 })
@@ -22,7 +24,30 @@ function sentence(t: ReconTransfer): string {
 }
 
 // 操作指南：每行一句调仓者习惯的「A 转仓 X元 至 B / C 建仓 X元」。
-export default function TransfersTable({ transfers }: { transfers: ReconTransfer[] }) {
+export default function TransfersTable({
+  transfers, portfolioId, onSaved,
+}: { transfers: ReconTransfer[]; portfolioId?: number | null; onSaved?: () => void }) {
+  const [saving, setSaving] = useState(false)
+
+  // 批量落账：把对账建议的每笔转仓写成真实交易记录（追加现金的只记买入，不带来源）。
+  const saveAll = async () => {
+    if (!portfolioId) { message.warning('请先选择一个实盘'); return }
+    const rows = transfers.map((t) => t.from_type === 'add_cash'
+      ? { to_code: t.to_code, to_name: t.to_name, amount: t.amount }
+      : { from_code: t.from_code, from_name: t.from_name, to_code: t.to_code, to_name: t.to_name, amount: t.amount })
+    setSaving(true)
+    try {
+      const { data } = await request.post<{ count: number; trade_date: string }>(
+        '/reconcile/txns/from-rebalance', { portfolio_id: portfolioId, transfers: rows })
+      message.success(`已落账 ${data.count} 笔交易记录（交易日 ${data.trade_date}）`)
+      onSaved?.()
+    } catch {
+      message.error('批量落账失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const copyAll = () => {
     const text = transfers.map(sentence).join('\n')
     if (!text) {
@@ -71,9 +96,22 @@ export default function TransfersTable({ transfers }: { transfers: ReconTransfer
       size="small"
       title={`操作指南（${transfers.length} 笔调仓动作）`}
       extra={
-        <Button size="small" icon={<CopyOutlined />} onClick={copyAll}>
-          复制操作指南
-        </Button>
+        <Space>
+          <Popconfirm
+            title="批量保存为交易记录？"
+            description="把以上每笔转仓按最近交易日的单位净值落成真实交易记录（转仓=一卖一买）。会追加到「实际持仓管理」的交易记录中。"
+            onConfirm={saveAll}
+            okText="保存"
+            cancelText="取消"
+          >
+            <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving}>
+              批量保存为交易记录
+            </Button>
+          </Popconfirm>
+          <Button size="small" icon={<CopyOutlined />} onClick={copyAll}>
+            复制操作指南
+          </Button>
+        </Space>
       }
     >
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: -4 }}>

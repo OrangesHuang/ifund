@@ -31,12 +31,31 @@ from app.reconcile.algo import classify
 DEFAULT_BAND = 0.03      # 缓冲带：盘子的 3 个百分点（绝对），对「按金额」最直观
 MIN_TRADE_YUAN = 100.0   # 小于此金额的动作忽略（抗噪 + 申赎门槛）
 
+# 与预设的贴近程度：代码命中 > 名称命中（A/C 份额）> 行业相似（杂牌）。值越小越「正主」。
+MATCH_RANK = {"exact": 0, "name": 1, "similar": 2, "outside": 3}
+
 
 def _pnl(mv: float, cost) -> float | None:
     """未实现盈亏 = 市值 − 成本；成本缺失返回 None。"""
     if cost is None:
         return None
     return round(mv - float(cost), 2)
+
+
+def _pick_fund(funds: list[dict], prefer_aligned: bool) -> dict | None:
+    """从赛道内持仓里选一只「操作基金」（向预设收敛，不看盈亏）。
+
+    ``prefer_aligned=True``  → 选最贴近预设的正主（代码/名称命中优先），用于加仓/代表；
+    ``prefer_aligned=False`` → 优先动相似度凑进来的杂牌，用于减仓资金来源（保住正主）。
+    同一贴近档内按市值大优先（可动额度大、换手少）。
+    """
+    if not funds:
+        return None
+    def rank(f: dict) -> int:
+        return MATCH_RANK.get(f.get("match"), 3)
+    if prefer_aligned:
+        return min(funds, key=lambda f: (rank(f), -f["market_value"]))
+    return min(funds, key=lambda f: (-rank(f), -f["market_value"]))
 
 
 def reconcile(target_items: list[dict], holdings: list[dict],
@@ -118,17 +137,19 @@ def reconcile(target_items: list[dict], holdings: list[dict],
         user_funds = sorted(cluster_user_funds.get(cid, []),
                             key=lambda x: x["market_value"], reverse=True)
         rep = it.get("fund") or {}
-        biggest = user_funds[0] if user_funds else None
+        # 向预设收敛：加仓/代表选正主（add_target），减仓优先动杂牌（trim_source）
+        add_target = _pick_fund(user_funds, prefer_aligned=True)
+        trim_source = _pick_fund(user_funds, prefer_aligned=False)
         cl_pnl = round(actual - per_cost[cid], 2) if per_cost_full.get(cid) else None
         name = it.get("cluster_name", "")
         row = {
             "cluster_id": cid, "cluster_name": name,
             "weight": round(weight, 4), "target": round(target, 2),
             "actual": round(actual, 2), "pnl": cl_pnl, "user_funds": user_funds,
-            "target_fund": {"code": (biggest or rep).get("code", ""),
-                            "name": (biggest or rep).get("name", "")},
-            "match": biggest["match"] if biggest else None,
-            "sim": biggest["sim"] if biggest else None,
+            "target_fund": {"code": (add_target or rep).get("code", ""),
+                            "name": (add_target or rep).get("name", "")},
+            "match": add_target["match"] if add_target else None,
+            "sim": add_target["sim"] if add_target else None,
             "action": "hold", "amount": 0.0,
             "note": "已在目标 ± 缓冲带内，保持不动（抗噪）",
         }
@@ -137,15 +158,17 @@ def reconcile(target_items: list[dict], holdings: list[dict],
             continue
         if diff > 0:
             is_open = actual < MIN_TRADE_YUAN
-            to = rep if is_open else biggest
+            to = rep if is_open else add_target
             if is_open:
                 row["target_fund"] = {"code": rep.get("code", ""), "name": rep.get("name", "")}
             needs.append({"cid": cid, "gap": diff, "is_open": is_open,
                           "to_code": to.get("code", ""), "to_name": to.get("name", ""),
                           "cluster_name": name})
-        elif trim_overflow:   # 超配且允许减 → 作为资金来源
+        elif trim_overflow:   # 超配且允许减 → 优先减杂牌（trim_source），保住正主
+            row["target_fund"] = {"code": trim_source["code"], "name": trim_source["name"]}
+            row["match"], row["sim"] = trim_source.get("match"), trim_source.get("sim")
             trims.append({"cid": cid, "surplus": -diff, "cluster_name": name,
-                          "from_code": biggest["code"], "from_name": biggest["name"]})
+                          "from_code": trim_source["code"], "from_name": trim_source["name"]})
         # diff<0 且 trim_overflow=False：base 已放大到不会超配，理论不会到这里，保持 hold
 
     # 4. 来源队列（优先级，尽量不用现金）：超配减仓(超配多者优先) → 赛道外(小额优先) → 追加现金兜底

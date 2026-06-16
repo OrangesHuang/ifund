@@ -62,7 +62,9 @@ def upsert_holding(pid: int, uid: int, code: str, name: str, mv: float,
     existing = database.select_one(TABLE, {
         "portfolio_id": f"eq.{pid}", "fund_code": f"eq.{code}",
     })
-    fields = {"fund_name": name, "market_value": mv, "cost": cost, "updated_at": _now()}
+    # 快照金额变了，份额基准随之失效：清空 base_shares 让合成时按最新净值重新派生冻结
+    fields = {"fund_name": name, "market_value": mv, "cost": cost,
+              "base_shares": None, "base_date": None, "updated_at": _now()}
     if existing:
         database.update(TABLE, {"portfolio_id": pid, "fund_code": code}, fields)
         return {**existing, **fields}

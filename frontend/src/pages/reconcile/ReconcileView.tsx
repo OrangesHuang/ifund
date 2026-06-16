@@ -10,8 +10,8 @@ import type { ReconResult } from './types'
 // 操作指南：把所选实盘关联的②仓位建议目标比例落到实盘持仓上，按赛道对齐推导操作。
 // 两个正交开关覆盖四类意图；现金由系统反推（"加满还差多少"），无需预填。
 export default function ReconcileView({
-  portfolioId, hasPreset,
-}: { portfolioId: number | null; hasPreset: boolean }) {
+  portfolioId, hasPreset, onSavedTxns,
+}: { portfolioId: number | null; hasPreset: boolean; onSavedTxns?: () => void }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ReconResult | null>(null)
   // 缓冲带：偏离在盘子的此比例内则保持不动（抗短期噪音、保调仓连贯）。默认标准 3%。
@@ -156,7 +156,11 @@ export default function ReconcileView({
 
       {!loading && summary && <SummaryCard summary={summary} />}
       {!loading && result?.transfers && result.transfers.length > 0 && (
-        <TransfersTable transfers={result.transfers} />
+        <TransfersTable
+          transfers={result.transfers}
+          portfolioId={portfolioId}
+          onSaved={onSavedTxns}
+        />
       )}
       {!loading && rows && rows.length > 0 && <ReconcileTable rows={rows} />}
 

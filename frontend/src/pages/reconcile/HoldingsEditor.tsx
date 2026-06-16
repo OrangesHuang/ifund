@@ -8,8 +8,16 @@ import type { UserHolding } from './types'
 
 const { TextArea } = Input
 
-// 持仓录入：表格行内改市值/删除 + 批量粘贴导入（每行「代码<分隔>金额」）。
-// 持仓按 portfolioId 隔离、持久化在后端 user_holdings 表，跨会话保留；改动后回调 onChanged。
+// 千分位只加在整数部分（避免给小数位也插逗号，如 1,023.7,099,999）
+const groupInt = (x: string | number | undefined) => {
+  const [i, d] = `${x ?? ''}`.split('.')
+  return i.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (d !== undefined ? `.${d}` : '')
+}
+const round2 = (n: number) => Math.round(n * 100) / 100
+
+// 初始化快照：首次批量建仓的金额 + 盈亏（不含交易明细），后续加/减/转走「交易记录」。
+// 快照行内改市值/删除 + 批量粘贴导入。按 portfolioId 隔离、持久化在 user_holdings 表；
+// 改动后回调 onChanged（让上层重算实际持仓）。
 export default function HoldingsEditor({
   portfolioId, onChanged,
 }: { portfolioId: number | null; onChanged?: () => void }) {
@@ -25,12 +33,12 @@ export default function HoldingsEditor({
     }
     setLoading(true)
     try {
-      const { data } = await request.get<{ items: UserHolding[] }>('/reconcile/holdings', {
+      const { data } = await request.get<{ items: UserHolding[] }>('/reconcile/holdings/snapshot', {
         params: { portfolio_id: portfolioId },
       })
       setItems(data.items ?? [])
     } catch {
-      message.error('加载持仓失败')
+      message.error('加载快照失败')
     } finally {
       setLoading(false)
     }
@@ -46,7 +54,8 @@ export default function HoldingsEditor({
     try {
       await request.post('/reconcile/holdings', {
         portfolio_id: portfolioId,
-        fund_code: code, fund_name: name, market_value: mv, cost: cost ?? null,
+        fund_code: code, fund_name: name, market_value: round2(mv),
+        cost: cost == null ? null : round2(cost),
       })
       onChanged?.()
     } catch {
@@ -121,15 +130,21 @@ export default function HoldingsEditor({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card
         size="small"
-        title={`实盘持仓（共 ${items.length} 只 · 合计 ${total.toLocaleString('zh-CN', { maximumFractionDigits: 0 })} 元）`}
+        title={`初始化快照（共 ${items.length} 只 · 合计 ${total.toLocaleString('zh-CN', { maximumFractionDigits: 0 })} 元）`}
         extra={
           <Button size="small" icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
         }
       >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="初始化快照只记录「金额 + 盈亏」、不含交易明细，用于首次大批量建仓的起点。建好快照后，后续的加仓 / 减仓 / 转仓请到下方「交易记录」录入——实际持仓由快照 + 交易记录综合算出。"
+        />
         {items.length === 0 ? (
-          <Empty description="暂无持仓，请在下方粘贴导入" />
+          <Empty description="暂无快照，请在下方粘贴导入首次建仓金额" />
         ) : (
           <Table
             size="small"
@@ -146,7 +161,7 @@ export default function HoldingsEditor({
               },
               { title: '基金名称', dataIndex: 'fund_name', render: (v: string) => v || <Typography.Text type="secondary">—</Typography.Text> },
               {
-                title: '当前市值（元）',
+                title: '快照市值（元）',
                 dataIndex: 'market_value',
                 width: 180,
                 align: 'right',
@@ -156,11 +171,15 @@ export default function HoldingsEditor({
                     min={0}
                     precision={2}
                     style={{ width: 150 }}
-                    formatter={(x) => `${x}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                    formatter={groupInt}
                     parser={(x) => Number((x || '').replace(/,/g, ''))}
                     onBlur={(e) => {
                       const mv = Number((e.target.value || '').replace(/,/g, ''))
-                      if (Number.isFinite(mv) && mv !== v) saveValue(row.fund_code, row.fund_name, mv)
+                      if (!Number.isFinite(mv) || mv === v) return
+                      // 改市值时保持持有收益不变 → 成本随之调整
+                      const oldPnl = row.cost == null ? null : (row.market_value || 0) - row.cost
+                      const cost = oldPnl == null ? null : mv - oldPnl
+                      saveValue(row.fund_code, row.fund_name, mv, cost)
                     }}
                   />
                 ),
@@ -168,19 +187,34 @@ export default function HoldingsEditor({
               {
                 title: '持有收益（元）',
                 dataIndex: 'cost',
-                width: 130,
+                width: 160,
                 align: 'right',
                 render: (_: unknown, row) => {
-                  if (row.cost === null || row.cost === undefined) {
-                    return <Typography.Text type="secondary">—</Typography.Text>
-                  }
-                  const pnl = (row.market_value || 0) - row.cost
-                  const color = pnl > 0 ? '#f5222d' : pnl < 0 ? '#52c41a' : undefined
+                  const pnl = row.cost == null ? null : round2((row.market_value || 0) - row.cost)
+                  const color = pnl == null ? undefined : pnl > 0 ? '#f5222d' : pnl < 0 ? '#52c41a' : undefined
                   return (
-                    <span style={{ color }}>
-                      {pnl > 0 ? '+' : ''}
-                      {pnl.toLocaleString('zh-CN', { maximumFractionDigits: 0 })}
-                    </span>
+                    <InputNumber
+                      value={pnl}
+                      precision={2}
+                      style={{ width: 140, color }}
+                      placeholder="未填"
+                      formatter={groupInt}
+                      parser={(x) => Number((x || '').replace(/[,+]/g, ''))}
+                      onChange={(val) => {
+                        // 清空 → 成本置空（未提供）
+                        if (val === null || val === undefined) {
+                          if (row.cost != null) saveValue(row.fund_code, row.fund_name, row.market_value, null)
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const raw = (e.target.value || '').replace(/[,+]/g, '')
+                        if (raw === '') return
+                        const newPnl = Number(raw)
+                        if (!Number.isFinite(newPnl) || newPnl === pnl) return
+                        // 改持有收益时保持市值不变 → 成本 = 市值 − 持有收益
+                        saveValue(row.fund_code, row.fund_name, row.market_value, (row.market_value || 0) - newPnl)
+                      }}
+                    />
                   )
                 },
               },

@@ -8,14 +8,43 @@ export interface Portfolio {
   created_at?: string
 }
 
-// 用户实盘持仓（持久化在 user_holdings 表）
+// 用户实盘持仓快照（持久化在 user_holdings 表；初始化金额 + 盈亏）
 export interface UserHolding {
   id?: number
   fund_code: string
   fund_name: string
-  market_value: number      // 当前市值（元）
-  cost?: number | null      // 持仓成本（元）；null=未提供。盈亏=市值−成本
+  market_value: number      // 快照市值（元）
+  cost?: number | null      // 快照成本（元）= 市值−盈亏；null=未提供
+  base_shares?: number | null
+  base_date?: string | null
   updated_at?: string
+}
+
+// 实际持仓（快照 + 交易回放合成；后端 holdings_compute）
+export interface ComputedHolding {
+  fund_code: string
+  fund_name: string
+  market_value: number          // 当前市值 = 份额 × 最新单位净值
+  cost?: number | null          // 合成成本（移动平均）
+  shares?: number | null        // 合成份额
+  latest_nav?: number | null    // 最新单位净值
+  nav_date?: string | null      // 最新净值日
+  pnl?: number | null           // 未实现盈亏 = 市值 − 成本
+  valuation_ok?: boolean        // false=无净值，按金额累计的退化估值
+}
+
+// 实盘交易记录（holding_txns 表）：买入/卖出，转仓拆成共享 transfer_id 的一买一卖
+export interface Txn {
+  id: number
+  fund_code: string
+  fund_name: string
+  txn_type: 'buy' | 'sell'
+  trade_date: string
+  amount: number                // 申购/赎回金额（元）
+  nav?: number | null           // 落账锁定的当日单位净值
+  shares?: number | null        // 折算份额 = amount ÷ nav
+  transfer_id?: string | null   // 非空=属于一次转仓
+  note?: string
 }
 
 // 对账动作：建仓 / 加仓 / 减仓 / 不动 / 清仓 / 保留（子仓位模式下的赛道外）

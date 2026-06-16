@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Button, Card, Divider, Input, Modal, Popconfirm, Select, Space, Tag, Typography, message,
+  Alert, Button, Card, Divider, Input, Modal, Popconfirm, Select, Space, Tabs, Tag, Typography, message,
 } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import request from '../../api/request'
 import type { QueryPreset } from '../fund/types'
 import type { Portfolio } from './types'
-import HoldingsEditor from './HoldingsEditor'
+import HoldingsManager from './HoldingsManager'
 import ReconcileView from './ReconcileView'
 
 // 实盘：一站式独立板块。选实盘 → 关联仓位建议（预设）→ 录入持仓 → 生成操作指南。
@@ -19,6 +19,8 @@ export default function HoldingsPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [editMode, setEditMode] = useState<'create' | 'rename'>('create')
   const [editName, setEditName] = useState('')
+  // 调仓建议「批量保存为交易记录」后 +1，触发持仓管理页重算实际持仓
+  const [reloadSignal, setReloadSignal] = useState(0)
 
   const current = useMemo(() => portfolios.find((p) => p.id === pid) ?? null, [portfolios, pid])
 
@@ -159,9 +161,27 @@ export default function HoldingsPage() {
         </div>
       </Card>
 
-      <HoldingsEditor portfolioId={pid} />
-
-      <ReconcileView portfolioId={pid} hasPreset={!!current?.preset_id} />
+      <Tabs
+        defaultActiveKey="holdings"
+        items={[
+          {
+            key: 'holdings',
+            label: '实际持仓管理',
+            children: <HoldingsManager portfolioId={pid} reloadSignal={reloadSignal} />,
+          },
+          {
+            key: 'reconcile',
+            label: '调仓建议',
+            children: (
+              <ReconcileView
+                portfolioId={pid}
+                hasPreset={!!current?.preset_id}
+                onSavedTxns={() => setReloadSignal((s) => s + 1)}
+              />
+            ),
+          },
+        ]}
+      />
 
       <Modal
         open={editOpen}

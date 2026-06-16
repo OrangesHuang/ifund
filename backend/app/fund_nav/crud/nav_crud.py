@@ -24,6 +24,33 @@ def insert_rows(table: str, rows: list[dict]) -> None:
         database.batch_insert(table, rows)
 
 
+def unit_nav_on(code: str, date: str) -> tuple[str, float] | None:
+    """某基金 ``date`` 当日或之前最近一个交易日的 ``(trade_date, 单位净值)``；无则 None。
+
+    份额折算（金额 ÷ 净值）必须用**单位净值 nav**——累计净值 acc_nav 含分红会高估份额。
+    用户填的交易日可能是非交易日/停牌日，故取 ``trade_date <= date`` 的最近一条。
+    """
+    row = database.select_one("fund_nav", [
+        ("fund_code", f"eq.{code}"),
+        ("trade_date", f"lte.{date}"),
+        ("order", "trade_date.desc"),
+    ])
+    if row and row.get("nav") is not None:
+        return row["trade_date"], row["nav"]
+    return None
+
+
+def latest_unit_nav(code: str) -> tuple[str, float] | None:
+    """某基金最新一个交易日的 ``(trade_date, 单位净值)``；无则 None（合成当前市值用）。"""
+    row = database.select_one("fund_nav", [
+        ("fund_code", f"eq.{code}"),
+        ("order", "trade_date.desc"),
+    ])
+    if row and row.get("nav") is not None:
+        return row["trade_date"], row["nav"]
+    return None
+
+
 def recent_series(code: str, limit: int = 120) -> list[float]:
     """最近 limit 个交易日的累计净值序列（缺失回退单位净值），按时间升序。
 

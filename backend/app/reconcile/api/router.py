@@ -10,10 +10,12 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 
 from app import preset_access
+from app.fund_nav.crud import nav_crud
 from app.position.api.router import compute_position
 from app.position.algo import optimize
+from app.reconcile.algo import classify
 from app.reconcile.algo import reconcile as recon_algo
-from app.reconcile.crud import holdings_store, portfolios_store
+from app.reconcile.crud import holdings_compute, holdings_store, portfolios_store, txn_store
 from app.stock_industry.crud import industry_crud
 
 bp = Blueprint("reconcile", __name__, url_prefix="/api/reconcile")
@@ -99,7 +101,19 @@ def delete_portfolio(pid: int):
 @bp.get("/holdings")
 @jwt_required()
 def get_holdings():
-    """列出某实盘的持仓。query: ``?portfolio_id=``（缺省用默认实盘）。"""
+    """列出某实盘的**实际持仓**（快照 + 交易合成）。query: ``?portfolio_id=``（缺省用默认实盘）。"""
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    return jsonify({"portfolio_id": pf["id"], "items": holdings_compute.compute_holdings(pf["id"])})
+
+
+@bp.get("/holdings/snapshot")
+@jwt_required()
+def get_snapshot():
+    """列出某实盘的**初始化快照**原始行（供快照编辑用）。query: ``?portfolio_id=``。"""
     uid = preset_access.current_user_id()
     pf, error = _resolve_portfolio(uid)
     if error:
@@ -108,10 +122,46 @@ def get_holdings():
     return jsonify({"portfolio_id": pf["id"], "items": holdings_store.list_holdings(pf["id"])})
 
 
+@bp.get("/holdings/clusters")
+@jwt_required()
+def get_holdings_clusters():
+    """实际持仓基金 → 所属赛道（簇）名 映射（需实盘已关联预设）。query: ``?portfolio_id=``。
+
+    返回 ``{has_preset, map: {fund_code: cluster_name}}``；归类失败的基金标「赛道外」。
+    复用对账同款聚类与归类逻辑（compute_position + classify），仅用于展示。
+    """
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    preset_id = pf.get("preset_id")
+    if not preset_id:
+        return jsonify({"has_preset": False, "map": {}})
+    items = preset_access.snapshot_items(preset_id, uid)
+    if items is None:
+        return jsonify({"has_preset": True, "map": {}})
+    result, clusters = compute_position(items, optimize.DEFAULT_CAP)
+    if result is None or not result.get("items"):
+        return jsonify({"has_preset": True, "map": {}})
+    code2cluster = classify.build_code_to_cluster(clusters)
+    name2cluster = classify.build_name_index(clusters)
+    cluster_vecs = classify.cluster_vectors(clusters)
+    cid2name = {it["cluster_id"]: it.get("cluster_name", "") for it in result["items"]}
+    ind_idx = industry_crud.industry_index()
+    out: dict[str, str] = {}
+    for h in holdings_compute.compute_holdings(pf["id"]):
+        cid, _match, _sim = classify.classify_fund(
+            h["fund_code"], h.get("fund_name", ""),
+            code2cluster, name2cluster, cluster_vecs, ind_idx)
+        out[h["fund_code"]] = cid2name.get(cid, "赛道外") if cid is not None else "赛道外"
+    return jsonify({"has_preset": True, "map": out})
+
+
 @bp.post("/holdings")
 @jwt_required()
 def upsert_holding():
-    """新增/更新一只持仓。body: ``{portfolio_id?, fund_code, fund_name?, market_value, cost?}``。"""
+    """新增/更新一只快照持仓。body: ``{portfolio_id?, fund_code, fund_name?, market_value, cost?}``。"""
     uid = preset_access.current_user_id()
     pf, error = _resolve_portfolio(uid)
     if error:
@@ -175,6 +225,165 @@ def clear_holdings():
     return jsonify({"ok": True})
 
 
+# ── 交易记录 CRUD（按 portfolio_id 隔离）──────────────────────
+
+@bp.get("/txns")
+@jwt_required()
+def get_txns():
+    """列出某实盘的交易记录（按交易日升序）。query: ``?portfolio_id=``。"""
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    return jsonify({"portfolio_id": pf["id"], "items": txn_store.list_txns(pf["id"])})
+
+
+@bp.post("/txns")
+@jwt_required()
+def add_txn():
+    """记一笔交易。body: ``{portfolio_id?, kind, trade_date, amount, ...}``。
+
+    ``kind=buy/sell``：``{fund_code|fund_name, trade_date, amount}``；
+    ``kind=transfer``：``{from_code|from_name, to_code|to_name, trade_date, amount}``。
+    落账时锁定当日单位净值并折算份额。
+    """
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    body = request.get_json(silent=True) or {}
+    kind = body.get("kind") or body.get("txn_type")
+    date = str(body.get("trade_date") or "").strip()
+    if not date:
+        return jsonify({"detail": "trade_date required"}), 400
+    try:
+        amount = float(body.get("amount") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"detail": "amount invalid"}), 400
+    if amount <= 0:
+        return jsonify({"detail": "amount must be positive"}), 400
+    note = body.get("note", "")
+    try:
+        if kind == "transfer":
+            res = txn_store.add_transfer(
+                pf["id"], uid, body.get("from_code", ""), body.get("from_name", ""),
+                body.get("to_code", ""), body.get("to_name", ""), date, amount, note)
+            return jsonify(res)
+        if kind in ("buy", "sell"):
+            row = txn_store.add_txn(pf["id"], uid, body.get("fund_code", ""),
+                                    body.get("fund_name", ""), kind, date, amount, note)
+            return jsonify(row)
+    except ValueError as e:
+        return jsonify({"detail": str(e)}), 400
+    return jsonify({"detail": f"bad kind: {kind}"}), 400
+
+
+@bp.patch("/txns/<int:txn_id>")
+@jwt_required()
+def update_txn(txn_id: int):
+    """修改一条交易记录（买入/卖出）。body: ``{portfolio_id?, kind?, fund_code/fund_name?, trade_date?, amount?}``。
+
+    改了金额/日期/基金会按新交易日重新锁定单位净值并折算份额。
+    """
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    body = request.get_json(silent=True) or {}
+    amount = body.get("amount")
+    if amount is not None:
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            return jsonify({"detail": "amount invalid"}), 400
+        if amount <= 0:
+            return jsonify({"detail": "amount must be positive"}), 400
+    try:
+        row = txn_store.update_txn(
+            pf["id"], txn_id,
+            code=body.get("fund_code", ""), name=body.get("fund_name", ""),
+            txn_type=body.get("kind") or body.get("txn_type"),
+            date=(str(body.get("trade_date")).strip() if body.get("trade_date") else None),
+            amount=amount)
+    except ValueError as e:
+        return jsonify({"detail": str(e)}), 400
+    if row is None:
+        return jsonify({"detail": "txn not found"}), 404
+    return jsonify(row)
+
+
+@bp.delete("/txns/<int:txn_id>")
+@jwt_required()
+def delete_txn(txn_id: int):
+    """删除一条交易记录。query: ``?portfolio_id=``。"""
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    txn_store.delete_txn(pf["id"], txn_id)
+    return jsonify({"ok": True})
+
+
+@bp.post("/txns/bulk-delete")
+@jwt_required()
+def bulk_delete_txns():
+    """批量删除交易记录。body: ``{portfolio_id?, ids:[...]}``。"""
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    body = request.get_json(silent=True) or {}
+    count = txn_store.delete_txns(pf["id"], body.get("ids") or [])
+    return jsonify({"count": count})
+
+
+@bp.post("/txns/from-rebalance")
+@jwt_required()
+def txns_from_rebalance():
+    """把一次对账的转仓建议批量落成交易记录。
+
+    body: ``{portfolio_id?, trade_date?, transfers:[{from_code,from_name,to_code,to_name,amount}]}``。
+    每条转仓拆成「源卖出 + 目标买入」两条共享 transfer_id；trade_date 缺省取最近交易日。
+    """
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    body = request.get_json(silent=True) or {}
+    date = str(body.get("trade_date") or "").strip() or nav_crud.latest_trade_date()
+    transfers = body.get("transfers") or []
+    saved = 0
+    for t in transfers:
+        try:
+            amount = float(t.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        from_code = str(t.get("from_code") or "").strip()
+        to_code = str(t.get("to_code") or "").strip()
+        if from_code and to_code:
+            txn_store.add_transfer(pf["id"], uid, from_code, t.get("from_name", ""),
+                                   to_code, t.get("to_name", ""), date, amount,
+                                   note="对账批量落账")
+            saved += 1
+        elif to_code:  # 纯加仓
+            txn_store.add_txn(pf["id"], uid, to_code, t.get("to_name", ""),
+                              "buy", date, amount, note="对账批量落账")
+            saved += 1
+        elif from_code:  # 纯减仓
+            txn_store.add_txn(pf["id"], uid, from_code, t.get("from_name", ""),
+                              "sell", date, amount, note="对账批量落账")
+            saved += 1
+    return jsonify({"count": saved, "trade_date": date})
+
+
 @bp.post("/run")
 @jwt_required()
 def run():
@@ -199,7 +408,7 @@ def run():
     if items is None:
         return jsonify({"rows": None, "reason": "该预设尚无镜像快照，请先在筛选页保存镜像"})
 
-    holdings = holdings_store.list_holdings(pf["id"])
+    holdings = holdings_compute.compute_holdings(pf["id"])
     if not holdings:
         return jsonify({"rows": None, "reason": "该实盘尚未录入任何持仓，请先在上方录入"})
 
