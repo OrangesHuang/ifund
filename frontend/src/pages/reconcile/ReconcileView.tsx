@@ -5,6 +5,7 @@ import request from '../../api/request'
 import HoldingsEditor from './HoldingsEditor'
 import SummaryCard from './SummaryCard'
 import ReconcileTable from './ReconcileTable'
+import TransfersTable from './TransfersTable'
 import type { ReconResult } from './types'
 
 // 实盘对账视图：导入持仓 + 可投现金，复用③仓位的目标权重，按赛道对齐算加/减/建/清金额。
@@ -20,8 +21,8 @@ const ReconcileView = forwardRef<
   const [band, setBand] = useState(0.03)
   // 均衡强度 cap：与仓位建议一致，默认「紧」0.14。
   const [cap, setCap] = useState(0.14)
-  // 模式：子仓位（默认，赛道外保留不动）/ 整盘（赛道外清仓、按全账户迁移）。
-  const [mode, setMode] = useState<'sleeve' | 'whole'>('sleeve')
+  // 模式：子仓位（默认，赛道外保留不动）/ 智能换仓（赛道外按需卖出补低配）/ 整盘（赛道外全清）。
+  const [mode, setMode] = useState<'sleeve' | 'swap' | 'whole'>('sleeve')
 
   useEffect(() => {
     setResult(null)
@@ -81,15 +82,16 @@ const ReconcileView = forwardRef<
               addonAfter="元"
             />
           </span>
-          <Tooltip title="子仓位：把预设当成账户里的一个子仓位，只调能对上赛道的基金，赛道外保留不动、目标按「匹配市值+现金」分配。整盘：把整个账户向目标迁移，赛道外建议清仓、目标按「全账户+现金」分配。">
+          <Tooltip title="子仓位：只调能对上赛道的基金，赛道外保留不动、目标按「匹配市值+现金」分配。智能换仓：在子仓位目标下，按「现金→赛道外→超配减仓」优先级卖出补低配，生成「卖A→买B」换仓清单，赛道外够补即止不强制全清。整盘：整个账户向目标迁移，赛道外全部清仓。">
             <span>
               模式：
               <Segmented
                 style={{ marginLeft: 8 }}
                 value={mode}
-                onChange={(v) => setMode(v as 'sleeve' | 'whole')}
+                onChange={(v) => setMode(v as 'sleeve' | 'swap' | 'whole')}
                 options={[
                   { label: '子仓位', value: 'sleeve' },
+                  { label: '智能换仓', value: 'swap' },
                   { label: '整盘', value: 'whole' },
                 ]}
               />
@@ -159,6 +161,9 @@ const ReconcileView = forwardRef<
       )}
 
       {!loading && summary && <SummaryCard summary={summary} />}
+      {!loading && result?.transfers && result.transfers.length > 0 && (
+        <TransfersTable transfers={result.transfers} />
+      )}
       {!loading && rows && rows.length > 0 && <ReconcileTable rows={rows} />}
 
       {!loading && !result && <Empty description="导入持仓并填写可投现金后，点「开始对账」" />}

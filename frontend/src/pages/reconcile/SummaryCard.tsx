@@ -4,9 +4,26 @@ import type { ReconSummary } from './types'
 const yuan = (v: number) => v.toLocaleString('zh-CN', { maximumFractionDigits: 0 })
 
 // 对账汇总卡：模式 + 总资产构成 + 盈亏（仅展示）+ 买卖合计 + 动作计数 + 资金约束提示
+const MODE_META: Record<ReconSummary['mode'], { label: string; color: string; tip: string }> = {
+  sleeve: {
+    label: '子仓位', color: 'blue',
+    tip: '把所选预设当成账户里的一个子仓位，只调能对上赛道的基金，赛道外保留不动。目标按「匹配市值 + 可投现金」分配。',
+  },
+  swap: {
+    label: '智能换仓', color: 'gold',
+    tip: '在子仓位目标下，按「现金→赛道外→超配减仓」优先级把低配缺口配对到资金来源，生成「卖A→买B」换仓清单。赛道外够补即止、不强制全清，尽量不动赛道内已有持仓。',
+  },
+  whole: {
+    label: '整盘', color: 'volcano',
+    tip: '把整个账户向目标迁移，赛道外基金建议清仓。目标按「全账户市值 + 可投现金」分配。',
+  },
+}
+
 export default function SummaryCard({ summary }: { summary: ReconSummary }) {
   const c = summary.counts
   const sleeve = summary.mode === 'sleeve'
+  const swap = summary.mode === 'swap'
+  const m = MODE_META[summary.mode]
   const pnl = summary.pnl_total
   const pnlColor = pnl == null ? undefined : pnl > 0 ? '#f5222d' : pnl < 0 ? '#52c41a' : undefined
   return (
@@ -15,14 +32,8 @@ export default function SummaryCard({ summary }: { summary: ReconSummary }) {
       title={
         <span>
           对账汇总{' '}
-          <Tooltip
-            title={
-              sleeve
-                ? '子仓位模式：把所选预设当成账户里的一个子仓位，只调能对上赛道的基金，赛道外基金保留不动。目标按「匹配市值 + 可投现金」分配。'
-                : '整盘模式：把整个账户向目标迁移，赛道外基金建议清仓。目标按「全账户市值 + 可投现金」分配。'
-            }
-          >
-            <Tag color={sleeve ? 'blue' : 'volcano'}>{sleeve ? '子仓位' : '整盘'}</Tag>
+          <Tooltip title={m.tip}>
+            <Tag color={m.color}>{m.label}</Tag>
           </Tooltip>
         </span>
       }
@@ -40,15 +51,32 @@ export default function SummaryCard({ summary }: { summary: ReconSummary }) {
           <Statistic title="可投现金" value={yuan(summary.cash)} suffix="元" />
         </Col>
         <Col xs={12} sm={8} md={6}>
-          <Tooltip title={sleeve ? '不属于本组合任一赛道、本次保留不动的持仓市值' : '不属于本组合任一赛道、建议清仓的持仓市值'}>
+          <Tooltip title="不属于本组合任一赛道的持仓市值">
             <Statistic
-              title={sleeve ? '赛道外（保留）' : '赛道外（清仓）'}
+              title={sleeve ? '赛道外（保留）' : swap ? '赛道外（按需卖出）' : '赛道外（清仓）'}
               value={yuan(summary.outside_value)}
               suffix="元"
               valueStyle={{ color: summary.outside_value > 0 ? '#8c8c8c' : undefined }}
             />
           </Tooltip>
         </Col>
+        {swap && (
+          <Col xs={24} sm={16} md={18}>
+            <Tooltip title="本次换仓的买入资金来源构成，按优先级：现金 → 赛道外卖出 → 赛道内超配减仓">
+              <Statistic
+                title="换仓资金来源"
+                valueRender={() => (
+                  <span style={{ fontSize: 16 }}>
+                    现金 <b style={{ color: '#1677ff' }}>{yuan(summary.from_cash ?? 0)}</b>
+                    {' + '}赛道外卖出 <b style={{ color: '#722ed1' }}>{yuan(summary.from_outside ?? 0)}</b>
+                    {' + '}超配减仓 <b style={{ color: '#d48806' }}>{yuan(summary.from_trim ?? 0)}</b>
+                    {' = 买入 '}<b style={{ color: '#fa541c' }}>{yuan(summary.buy_total)}</b> 元
+                  </span>
+                )}
+              />
+            </Tooltip>
+          </Col>
+        )}
         {summary.has_cost && (
           <>
             <Col xs={12} sm={8} md={6}>

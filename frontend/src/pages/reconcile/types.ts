@@ -58,8 +58,21 @@ export interface ReconCounts {
   keep: number
 }
 
+// 一笔换仓配对（swap 模式）：卖出某来源 → 买入某目标基金
+export interface ReconTransfer {
+  from_type: 'cash' | 'outside' | 'trim'   // 资金来源：现金 / 赛道外卖出 / 超配减仓
+  from_code: string
+  from_name: string
+  from_cluster: string
+  to_code: string
+  to_name: string
+  to_cluster: string
+  to_action: 'open' | 'add'
+  amount: number
+}
+
 export interface ReconSummary {
-  mode: 'sleeve' | 'whole'
+  mode: 'sleeve' | 'whole' | 'swap'
   base_asset: number      // 目标分配基准（子仓位=匹配市值+现金）
   total_asset: number     // 总资产 = 全部持仓市值 + 可投现金
   held_total: number      // 当前持仓总市值（含赛道外）
@@ -69,6 +82,9 @@ export interface ReconSummary {
   buy_total: number       // 建议买入合计
   sell_total: number      // 建议卖出合计
   leftover_cash: number   // 配平后剩余现金
+  from_cash?: number      // swap：来自现金的资金
+  from_outside?: number   // swap：来自赛道外卖出的资金
+  from_trim?: number      // swap：来自超配减仓的资金
   band: number            // 缓冲带（占基准比例）
   scaled: boolean         // 是否因资金不足等比缩减了买入
   has_cost: boolean       // 是否有成本数据
@@ -90,6 +106,7 @@ export interface ReconMeta {
   n_target_clusters: number
   match_counts: ReconMatchCounts
   outside_count: number
+  transfer_count?: number
   cap?: number
   nav_as_of?: string | null
   holdings_quarter?: string | null
@@ -99,5 +116,6 @@ export interface ReconResult {
   rows: ReconRow[] | null
   summary?: ReconSummary
   meta?: ReconMeta
+  transfers?: ReconTransfer[]
   reason?: string
 }

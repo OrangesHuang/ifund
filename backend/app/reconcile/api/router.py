@@ -111,7 +111,7 @@ def run():
     if result is None or not result.get("items"):
         return jsonify({"rows": None, "reason": "有效基金不足（需 ≥3 只含股票持仓的基金），无法生成目标"})
 
-    mode = body.get("mode") if body.get("mode") in ("sleeve", "whole") else "sleeve"
+    mode = body.get("mode") if body.get("mode") in ("sleeve", "whole", "swap") else "sleeve"
     ind_idx = industry_crud.industry_index()
     recon = recon_algo.reconcile(result["items"], holdings, cash, band, clusters, ind_idx, mode)
     recon["meta"]["cap"] = cap

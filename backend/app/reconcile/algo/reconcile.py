@@ -79,6 +79,19 @@ def reconcile(target_items: list[dict], holdings: list[dict], cash: float,
     matched_total = sum(per_actual.values())
     outside_value = sum(o["market_value"] for o in outside)
 
+    pnl_total = round(pnl_known_mv - cost_total, 2) if has_any_cost else None
+    return_pct = (round(pnl_total / cost_total * 100, 2)
+                  if has_any_cost and cost_total > 0 else None)
+    pnl_ctx = {"has_cost": has_any_cost, "pnl_total": pnl_total,
+               "return_pct": return_pct, "cost_covered_mv": round(pnl_known_mv, 2)}
+
+    # 智能换仓：sleeve 口径定目标，按「现金→赛道外→超配减仓」优先级配对资金，生成换仓流水
+    if mode == "swap":
+        return _reconcile_swap(
+            target_items, per_actual, per_cost, per_cost_full, cluster_user_funds,
+            outside, cash, band, held_total, matched_total, outside_value,
+            match_counts, pnl_ctx)
+
     # 2. 目标基准：子仓位=匹配市值+现金；整盘=全账户+现金（赛道外会被清仓释放）
     base_asset = (matched_total + cash) if mode == "sleeve" else (held_total + cash)
     band_yuan = band * base_asset
@@ -186,10 +199,6 @@ def reconcile(target_items: list[dict], holdings: list[dict], cash: float,
     for r in rows:
         counts[r["action"]] = counts.get(r["action"], 0) + 1
 
-    pnl_total = round(pnl_known_mv - cost_total, 2) if has_any_cost else None
-    return_pct = (round(pnl_total / cost_total * 100, 2)
-                  if has_any_cost and cost_total > 0 else None)
-
     summary = {
         "mode": mode,
         "base_asset": round(base_asset, 2),     # 目标分配基准（子仓位=匹配+现金）
@@ -202,10 +211,7 @@ def reconcile(target_items: list[dict], holdings: list[dict], cash: float,
         "sell_total": round(sell_total, 2),
         "leftover_cash": leftover_cash,
         "band": band, "scaled": scaled,
-        "has_cost": has_any_cost,
-        "pnl_total": pnl_total,          # 有成本部分的未实现盈亏（仅展示）
-        "return_pct": return_pct,        # 有成本部分的收益率%（仅展示）
-        "cost_covered_mv": round(pnl_known_mv, 2),
+        **pnl_ctx,                       # 有成本部分的未实现盈亏/收益率（仅展示）
         "counts": counts,
     }
     meta = {
@@ -214,3 +220,185 @@ def reconcile(target_items: list[dict], holdings: list[dict], cash: float,
         "outside_count": len(outside),
     }
     return {"rows": rows, "summary": summary, "meta": meta}
+
+
+def _reconcile_swap(target_items, per_actual, per_cost, per_cost_full, cluster_user_funds,
+                    outside, cash, band, held_total, matched_total, outside_value,
+                    match_counts, pnl_ctx) -> dict:
+    """智能换仓：sleeve 口径定各赛道目标，按「现金→赛道外(小额优先)→超配减仓」优先级把
+    低配缺口逐笔配对到资金来源，产出「卖 A → 买 B」换仓流水（transfers）。
+
+    取向：尽量不动赛道内已有持仓——超配赛道仅在现金+赛道外不足以补低配时才减；赛道外按
+    小额优先卖（顺带清理零碎仓、保留大额底仓），够补即止、不强制全清。
+    """
+    base_asset = matched_total + cash
+    band_yuan = band * base_asset
+
+    # 1. 逐赛道定目标，拆出「低配缺口(needs)」与「超配可减(trims)」，先全部建为 hold 行
+    cluster_rows: dict[int, dict] = {}
+    needs: list[dict] = []
+    trims: list[dict] = []
+    for it in target_items:
+        cid = it["cluster_id"]
+        weight = float(it.get("weight") or 0.0)
+        target = weight * base_asset
+        actual = per_actual.get(cid, 0.0)
+        diff = target - actual
+        user_funds = sorted(cluster_user_funds.get(cid, []),
+                            key=lambda x: x["market_value"], reverse=True)
+        rep = it.get("fund") or {}
+        biggest = user_funds[0] if user_funds else None
+        cl_pnl = round(actual - per_cost[cid], 2) if per_cost_full.get(cid) else None
+        name = it.get("cluster_name", "")
+        row = {
+            "cluster_id": cid, "cluster_name": name,
+            "weight": round(weight, 4), "target": round(target, 2),
+            "actual": round(actual, 2), "pnl": cl_pnl, "user_funds": user_funds,
+            "target_fund": {"code": (biggest or rep).get("code", ""),
+                            "name": (biggest or rep).get("name", "")},
+            "match": biggest["match"] if biggest else None,
+            "sim": biggest["sim"] if biggest else None,
+            "action": "hold", "amount": 0.0,
+            "note": "已在目标 ± 缓冲带内，保持不动（抗噪）",
+        }
+        cluster_rows[cid] = row
+        if abs(diff) <= band_yuan or abs(diff) < MIN_TRADE_YUAN:
+            continue
+        if diff > 0:
+            is_open = actual < MIN_TRADE_YUAN
+            to = rep if is_open else biggest
+            if is_open:
+                row["target_fund"] = {"code": rep.get("code", ""), "name": rep.get("name", "")}
+            needs.append({"cid": cid, "gap": diff, "is_open": is_open,
+                          "to_code": to.get("code", ""), "to_name": to.get("name", ""),
+                          "cluster_name": name})
+        else:
+            trims.append({"cid": cid, "surplus": -diff, "cluster_name": name,
+                          "from_code": biggest["code"], "from_name": biggest["name"]})
+
+    # 2. 来源队列（优先级）：现金 → 赛道外(小额优先) → 超配减仓(超配多者优先)
+    sources: list[dict] = []
+    if cash >= MIN_TRADE_YUAN:
+        sources.append({"type": "cash", "code": "", "name": "可投现金",
+                        "cluster": "现金", "avail": cash})
+    for o in sorted(outside, key=lambda x: x["market_value"]):
+        if o["market_value"] >= MIN_TRADE_YUAN:
+            sources.append({"type": "outside", "code": o["code"], "name": o["name"],
+                            "cluster": "赛道外", "avail": o["market_value"]})
+    for t in sorted(trims, key=lambda x: -x["surplus"]):
+        sources.append({"type": "trim", "code": t["from_code"], "name": t["from_name"],
+                        "cluster": t["cluster_name"], "avail": t["surplus"], "cid": t["cid"]})
+
+    # 3. 配对：缺口大者优先，从来源队列顺序取钱，逐笔记 transfer
+    transfers: list[dict] = []
+    used_cash = 0.0
+    used_outside: dict[str, float] = {}
+    used_trim: dict[int, float] = {}
+    si = 0
+    for need in sorted(needs, key=lambda x: -x["gap"]):
+        remain = need["gap"]
+        while remain >= MIN_TRADE_YUAN and si < len(sources):
+            s = sources[si]
+            take = min(remain, s["avail"])
+            if take >= MIN_TRADE_YUAN:
+                transfers.append({
+                    "from_type": s["type"], "from_code": s["code"], "from_name": s["name"],
+                    "from_cluster": s["cluster"], "to_code": need["to_code"],
+                    "to_name": need["to_name"], "to_cluster": need["cluster_name"],
+                    "to_action": "open" if need["is_open"] else "add", "amount": round(take, 2),
+                })
+                if s["type"] == "cash":
+                    used_cash += take
+                elif s["type"] == "outside":
+                    used_outside[s["code"]] = used_outside.get(s["code"], 0.0) + take
+                else:
+                    used_trim[s["cid"]] = used_trim.get(s["cid"], 0.0) + take
+                remain -= take
+                s["avail"] -= take
+            if s["avail"] < MIN_TRADE_YUAN:
+                si += 1
+        need["filled"] = round(need["gap"] - remain, 2)
+
+    # 4. 回填 needs/trims 的 action/amount
+    filled_by_cid = {n["cid"]: n for n in needs}
+    for cid, n in filled_by_cid.items():
+        row = cluster_rows[cid]
+        if n["filled"] < MIN_TRADE_YUAN:
+            row["action"] = "hold"
+            row["amount"] = 0.0
+            row["note"] = "低配，但本轮可动用资金已用尽，暂缓补仓"
+            continue
+        row["action"] = "open" if n["is_open"] else "add"
+        row["amount"] = n["filled"]
+        verb = "建仓" if n["is_open"] else "加仓"
+        row["note"] = f"低配，建议{verb}「{n['to_name']}」"
+        if n["filled"] < n["gap"] - 1:
+            short = round(n["gap"] - n["filled"], 2)
+            row["note"] += f"（资金有限，距目标还差约 {short:,.0f} 元，未完全到位）"
+    for t in trims:
+        cid = t["cid"]
+        row = cluster_rows[cid]
+        used = used_trim.get(cid, 0.0)
+        if used >= MIN_TRADE_YUAN:
+            row["action"] = "trim"
+            row["amount"] = round(-used, 2)
+            row["note"] = f"超配，且现金/赛道外不足，减仓「{t['from_name']}」补低配"
+        else:
+            row["action"] = "hold"
+            row["amount"] = 0.0
+            row["note"] = "超配，但已用现金/赛道外补足低配，暂不减（尽量不动赛道内）"
+
+    rows = list(cluster_rows.values())
+
+    # 5. 赛道外行：被动用的标卖出（部分/全部），未动用的保留
+    for o in outside:
+        sold = used_outside.get(o["code"], 0.0)
+        full = sold >= o["market_value"] - 1
+        if sold >= MIN_TRADE_YUAN:
+            action = "exit" if full else "trim"
+            note = (f"赛道外，{'清仓' if full else '部分卖出'}用于补低配赛道"
+                    f"（优先动用赛道外）")
+            amount = round(-sold, 2)
+        else:
+            action, amount = "keep", 0.0
+            note = "赛道外，本轮无需动用，保留不动"
+        rows.append({
+            "cluster_id": None, "cluster_name": "赛道外", "weight": 0.0, "target": 0.0,
+            "actual": o["market_value"], "pnl": o["pnl"],
+            "target_fund": {"code": o["code"], "name": o["name"]},
+            "user_funds": [o], "match": o["match"], "sim": o["sim"],
+            "action": action, "amount": amount, "note": note,
+        })
+
+    # 6. 汇总
+    from_cash = round(used_cash, 2)
+    from_outside = round(sum(used_outside.values()), 2)
+    from_trim = round(sum(used_trim.values()), 2)
+    buy_total = round(sum(t["amount"] for t in transfers), 2)
+    sell_total = round(from_outside + from_trim, 2)
+    leftover_cash = round(cash - from_cash, 2)
+    counts = {"open": 0, "add": 0, "trim": 0, "hold": 0, "exit": 0, "keep": 0}
+    for r in rows:
+        counts[r["action"]] = counts.get(r["action"], 0) + 1
+
+    summary = {
+        "mode": "swap",
+        "base_asset": round(base_asset, 2),
+        "total_asset": round(held_total + cash, 2),
+        "held_total": round(held_total, 2),
+        "matched_total": round(matched_total, 2),
+        "cash": round(cash, 2),
+        "outside_value": round(outside_value, 2),
+        "buy_total": buy_total, "sell_total": sell_total,
+        "leftover_cash": leftover_cash,
+        "from_cash": from_cash, "from_outside": from_outside, "from_trim": from_trim,
+        "band": band, "scaled": False,
+        **pnl_ctx, "counts": counts,
+    }
+    meta = {
+        "n_target_clusters": len(target_items),
+        "match_counts": match_counts,
+        "outside_count": len(outside),
+        "transfer_count": len(transfers),
+    }
+    return {"rows": rows, "summary": summary, "meta": meta, "transfers": transfers}
