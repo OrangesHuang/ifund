@@ -16,8 +16,9 @@ const PositionView = forwardRef<
 >(function PositionView({ presetId }, ref) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<PositionResult | null>(null)
-  // 均衡强度：单一行业穿透占比上限 cap，越小越分散（牺牲更多动量权重），越大越接近纯动量
-  const [cap, setCap] = useState(0.18)
+  // 均衡强度：单一行业穿透占比上限 cap，越小越分散（逼系统选行业不重叠的代表基金）。
+  // 默认「紧」(0.14)：实测对行业扎堆的预设，紧档分散度最高、风险调整后表现最好。
+  const [cap, setCap] = useState(0.14)
   // 仓位建议展示模式：detail=完整（指标/走势/持仓），simple=简洁（名称/编码/比例，便于复制）
   const [viewMode, setViewMode] = useState<'detail' | 'simple'>('detail')
   // 穿透联动：勾选的股票/行业，用于过滤+高亮下方代表基金
@@ -131,7 +132,7 @@ const PositionView = forwardRef<
             回测验证
           </Button>
         </Tooltip>
-        <Tooltip title="单一行业穿透占比上限：松=22%（更接近纯动量，行业更集中），中=18%，紧=14%（更分散，牺牲更多动量权重）。切换会立即重算。">
+        <Tooltip title="单一行业穿透占比上限：松=22%（行业更集中、更少替换 TOP1），中=18%，紧=14%（默认；更分散，逼系统为降相关多选行业不重叠的次优基金）。切换会立即重算。">
           <Segmented
             value={cap}
             disabled={loading}

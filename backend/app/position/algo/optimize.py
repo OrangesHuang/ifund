@@ -15,7 +15,7 @@ from __future__ import annotations
 
 TOPK = 5            # 每簇候选数
 WMIN, WMAX = 0.03, 0.25   # 单簇权重上下限（与 target_weights 截断一致）
-DEFAULT_CAP = 0.18  # 单一行业穿透占比上限（中等均衡）
+DEFAULT_CAP = 0.14  # 单一行业穿透占比上限（默认「紧」：更分散，逼系统选行业不重叠的代表基金）
 _PENALTY = 12.0     # 超过 cap 的惩罚强度（质量量纲 0~1，足够强即可压回可行域）
 
 
