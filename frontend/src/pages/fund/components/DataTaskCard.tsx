@@ -17,7 +17,7 @@ export default function DataTaskCard({ title, module, task, onStart, onTerminate
       : 0
 
   return (
-    <Card size="small" title={title} className="mb-2">
+    <Card size="small" title={title} className="h-full">
       <Space direction="vertical" className="w-full" style={{ width: '100%' }}>
         {task ? (
           <>
@@ -36,9 +36,9 @@ export default function DataTaskCard({ title, module, task, onStart, onTerminate
           <span className="text-gray-400">无进行中的任务</span>
         )}
         <Space>
-          <Tooltip title="按当前查询区的筛选条件拉取（预设拉取请用预设卡片）">
+          <Tooltip title="按上方「拉取范围」拉取该项数据">
             <Button type="primary" size="small" onClick={() => onStart(module)} disabled={!!running}>
-              按当前条件拉取
+              拉取
             </Button>
           </Tooltip>
           {running && (

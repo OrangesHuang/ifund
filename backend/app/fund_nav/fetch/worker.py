@@ -20,8 +20,26 @@ from app.common import worker_base
 from app.fund_nav.crud import nav_crud
 
 
+def _acc_nav_map(code):
+    """累计净值走势 → ``{trade_date: 累计净值}``。
+
+    累计净值（复权口径，分红除息日不断崖）在「累计净值走势」接口里，
+    「单位净值走势」接口**不返回**该列，故需单独拉一次按日期对齐。
+    接口异常时返回空表，降级为只存单位净值。
+    """
+    try:
+        frame = ak.fund_open_fund_info_em(symbol=code, indicator="累计净值走势")
+    except Exception:  # pylint: disable=broad-exception-caught
+        return {}
+    return {
+        str(row["净值日期"]): worker_base.safe_float(row.get("累计净值"))
+        for _, row in frame.iterrows()
+    }
+
+
 def _nav_rows(code, stored, now):
     frame = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
+    acc_map = _acc_nav_map(code)
     rows = []
     for _, row in frame.iterrows():
         day = str(row["净值日期"])
@@ -30,7 +48,7 @@ def _nav_rows(code, stored, now):
         rows.append({
             "fund_code": code, "trade_date": day,
             "nav": worker_base.safe_float(row.get("单位净值")),
-            "acc_nav": worker_base.safe_float(row.get("累计净值")),
+            "acc_nav": acc_map.get(day),
             "daily_return": worker_base.safe_float(row.get("日增长率")),
             "fetch_time": now,
         })

@@ -49,13 +49,15 @@ interface ColumnOptions {
   // 返回 true 表示该列可排序（由调用方根据后端白名单决定）
   sortable?: (field: string) => true | undefined
   onOpenDetail?: (code: string) => void
+  // 点击净值走势迷你图：打开交互式大图（带十字准星）
+  onOpenTrend?: (code: string, name: string) => void
   // 是否展示净值走势迷你图（镜像快照无净值序列时可关闭）
   showNav?: boolean
 }
 
 /** 基金详情结果列：基金筛选页与基金管理页共用，保证列与渲染一致。 */
 export function buildFundColumns(opts: ColumnOptions = {}): ColumnsType<FundItem> {
-  const { sortable, onOpenDetail, showNav = true } = opts
+  const { sortable, onOpenDetail, onOpenTrend, showNav = true } = opts
   const sorter = (field: string) => (sortable ? sortable(field) : undefined)
   const columns: ColumnsType<FundItem> = [
     { title: '代码', dataIndex: 'code', width: 90 },
@@ -73,7 +75,9 @@ export function buildFundColumns(opts: ColumnOptions = {}): ColumnsType<FundItem
     { title: '夏普3年', dataIndex: 'sharpe_3y', width: 100, sorter: sorter('sharpe_3y'), render: num },
     { title: '夏普1年', dataIndex: 'sharpe_1y', width: 100, sorter: sorter('sharpe_1y'), render: num },
     { title: '回撤3年', dataIndex: 'max_drawdown_3y', width: 100, sorter: sorter('max_drawdown_3y'), render: num },
+    { title: '回撤1年', dataIndex: 'max_drawdown_1y', width: 100, render: num },
     { title: '股票仓位', dataIndex: 'position_stock', width: 100, sorter: sorter('position_stock'), render: num },
+    { title: '债券仓位', dataIndex: 'position_bond', width: 100, render: num },
     {
       title: '前十大股票持仓',
       key: 'holdings_stock',
@@ -95,8 +99,20 @@ export function buildFundColumns(opts: ColumnOptions = {}): ColumnsType<FundItem
     columns.push({
       title: '净值走势',
       dataIndex: 'nav_series',
-      width: 160,
-      render: (series: number[] | undefined) => <Sparkline data={series ?? []} />,
+      width: 120,
+      fixed: 'right',
+      render: (series: number[] | undefined, row) =>
+        onOpenTrend ? (
+          <span
+            onClick={() => onOpenTrend(row.code, row.name)}
+            style={{ cursor: 'pointer' }}
+            title="点击查看交互式净值走势"
+          >
+            <Sparkline data={series ?? []} width={104} height={30} />
+          </span>
+        ) : (
+          <Sparkline data={series ?? []} width={104} height={30} />
+        ),
     })
   }
   return columns

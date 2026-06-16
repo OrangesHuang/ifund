@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { message } from 'antd'
 import request from '../../../api/request'
 import type {
+  CompareCondition,
   Filters,
   FundItem,
   FundTypeItem,
@@ -11,6 +12,23 @@ import type {
 } from '../types'
 
 const POLL_INTERVAL = 3000
+
+/** 规范化筛选条件（去空字段 + 排序），用于稳定比较「当前条件」与「预设条件」是否一致。 */
+function normalizeFilters(f: Filters): string {
+  const out: Record<string, unknown> = {}
+  if (f.keyword) out.keyword = f.keyword
+  if (f.name_contains) out.name_contains = f.name_contains
+  if (f.fund_types?.length) out.fund_types = [...f.fund_types].sort()
+  if (f.exclude_codes?.length) out.exclude_codes = [...f.exclude_codes].sort()
+  if (f.name_excludes?.length) out.name_excludes = [...f.name_excludes].sort()
+  if (f.conditions?.length) {
+    out.conditions = [...f.conditions].sort(
+      (a: CompareCondition, b: CompareCondition) =>
+        `${a.field}${a.op}${a.value}`.localeCompare(`${b.field}${b.op}${b.value}`),
+    )
+  }
+  return JSON.stringify(out)
+}
 
 /**
  * buildFilterParams：filters → 后端 query 参数。
@@ -44,6 +62,8 @@ export function useFundData() {
   const [loading, setLoading] = useState(false)
   const [fundTypes, setFundTypes] = useState<FundTypeItem[]>([])
   const [presets, setPresets] = useState<QueryPreset[]>([])
+  // 当前选中（应用）的预设 id；null 表示自由条件（全部基金）
+  const [activePresetId, setActivePresetId] = useState<number | null>(null)
 
   // 三套独立轮询任务状态
   const [detailTask, setDetailTask] = useState<RunningTask | null>(null)
@@ -208,12 +228,29 @@ export function useFundData() {
     }
   }, [fetchFunds])
 
+  // ---- 预设选中态 ----
+  // 当前选中的预设行；未选中为 null
+  const activePreset = useMemo(
+    () => presets.find((p) => p.id === activePresetId) ?? null,
+    [presets, activePresetId],
+  )
+  // 当前筛选条件是否已偏离选中预设（用于显示「更新预设」）
+  const dirty = useMemo(
+    () =>
+      activePreset
+        ? normalizeFilters(filters) !== normalizeFilters(activePreset.filters ?? {})
+        : false,
+    [filters, activePreset],
+  )
+
   // ---- 预设 CRUD ----
+  // 另存为新预设：保存后自动选中新预设
   const savePreset = useCallback(
     async (name: string) => {
       try {
-        await request.post('/fund/presets', { name, filters })
+        const { data } = await request.post('/fund/presets', { name, filters })
         await loadPresets()
+        if (data?.id) setActivePresetId(data.id)
         message.success('预设已保存')
       } catch {
         message.error('保存预设失败')
@@ -222,7 +259,7 @@ export function useFundData() {
     [filters, loadPresets],
   )
 
-  // 用当前查询条件覆盖已存在的预设（按 id，不改名）
+  // 用当前查询条件覆盖指定预设（按 id，不改名）
   const overwritePreset = useCallback(
     async (id: number) => {
       try {
@@ -236,19 +273,45 @@ export function useFundData() {
     [filters, loadPresets],
   )
 
+  // 更新当前选中预设（= 用当前条件覆盖它）
+  const updateActivePreset = useCallback(() => {
+    if (activePresetId != null) overwritePreset(activePresetId)
+  }, [activePresetId, overwritePreset])
+
+  // 重命名预设（仅改名，不动条件）
+  const renamePreset = useCallback(
+    async (id: number, name: string) => {
+      try {
+        await request.put(`/fund/presets/${id}`, { name })
+        await loadPresets()
+        message.success('已重命名')
+      } catch {
+        message.error('重命名失败')
+      }
+    },
+    [loadPresets],
+  )
+
   const deletePreset = useCallback(
     async (id: number) => {
       await request.delete(`/fund/presets/${id}`)
+      // 删的是当前选中预设则同时取消选中
+      setActivePresetId((cur) => (cur === id ? null : cur))
       await loadPresets()
     },
     [loadPresets],
   )
 
+  // 应用预设：选中高亮 + 载入条件
   const applyPreset = useCallback((preset: QueryPreset) => {
+    setActivePresetId(preset.id)
     setFilters(preset.filters ?? {})
     setPage(1)
     message.success(`已应用预设「${preset.name}」`)
   }, [])
+
+  // 取消选中（保留当前条件，仅去掉预设高亮）
+  const clearPreset = useCallback(() => setActivePresetId(null), [])
 
   return {
     filters,
@@ -264,6 +327,9 @@ export function useFundData() {
     loading,
     fundTypes,
     presets,
+    activePresetId,
+    activePreset,
+    dirty,
     detailTask,
     holdingsTask,
     navTask,
@@ -274,7 +340,10 @@ export function useFundData() {
     terminateTask,
     savePreset,
     overwritePreset,
+    updateActivePreset,
+    renamePreset,
     deletePreset,
     applyPreset,
+    clearPreset,
   }
 }

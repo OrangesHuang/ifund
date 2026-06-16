@@ -22,6 +22,7 @@ export interface FundItem {
   max_drawdown_3y: number | null
   max_drawdown_1y: number | null
   position_stock: number | null
+  position_bond: number | null
   holdings?: HoldingItem[]
   nav_series?: number[]
   [key: string]: unknown

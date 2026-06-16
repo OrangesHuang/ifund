@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Button, Col, Row, Space } from 'antd'
+import { Space } from 'antd'
 import { useFundData } from './hooks/useFundData'
 import FundQueryCard from './FundQueryCard'
 import PresetPanel from './components/PresetPanel'
-import DataTaskCard from './components/DataTaskCard'
+import DataFetchPanel from './components/DataFetchPanel'
 import FundDetailModal from './components/FundDetailModal'
 
 export default function FundPage() {
@@ -12,49 +12,13 @@ export default function FundPage() {
 
   return (
     <Space direction="vertical" className="w-full" style={{ width: '100%' }} size="middle">
-      <Row gutter={16}>
-        <Col xs={24} md={8}>
-          <DataTaskCard
-            title="详情拉取"
-            module="fund_detail"
-            task={data.detailTask}
-            onStart={data.startTask}
-            onTerminate={data.terminateTask}
-          />
-        </Col>
-        <Col xs={24} md={8}>
-          <DataTaskCard
-            title="持仓拉取"
-            module="fund_holdings"
-            task={data.holdingsTask}
-            onStart={data.startTask}
-            onTerminate={data.terminateTask}
-          />
-        </Col>
-        <Col xs={24} md={8}>
-          <DataTaskCard
-            title="净值拉取"
-            module="fund_nav"
-            task={data.navTask}
-            onStart={data.startTask}
-            onTerminate={data.terminateTask}
-          />
-        </Col>
-      </Row>
-
-      <Space>
-        <Button onClick={data.syncFundList} loading={data.loading}>
-          同步基金名单
-        </Button>
-      </Space>
-
       <PresetPanel
         presets={data.presets}
-        onSave={data.savePreset}
+        activeId={data.activePresetId}
         onApply={data.applyPreset}
-        onOverwrite={data.overwritePreset}
+        onRename={data.renamePreset}
         onDelete={data.deletePreset}
-        onFetch={(preset, module) => data.startTaskWith(module, preset.filters ?? {})}
+        onClear={data.clearPreset}
       />
 
       <FundQueryCard
@@ -79,8 +43,25 @@ export default function FundPage() {
           data.setFilters({})
           data.setSorters([])
           data.setPage(1)
+          data.clearPreset()
         }}
         onOpenDetail={setDetailCode}
+        activePreset={data.activePreset}
+        dirty={data.dirty}
+        onSavePreset={data.savePreset}
+        onUpdatePreset={data.updateActivePreset}
+      />
+
+      <DataFetchPanel
+        activePreset={data.activePreset}
+        hasConditions={(data.filters.conditions?.length ?? 0) > 0}
+        detailTask={data.detailTask}
+        holdingsTask={data.holdingsTask}
+        navTask={data.navTask}
+        onStart={data.startTask}
+        onTerminate={data.terminateTask}
+        onSync={data.syncFundList}
+        syncing={data.loading}
       />
 
       <FundDetailModal

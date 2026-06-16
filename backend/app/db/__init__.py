@@ -72,6 +72,12 @@ def list_funds_with_details(fund_params, detail_params, skip, limit, order_parts
     return get_db().list_funds_with_details(fund_params, detail_params, skip, limit, order_parts)
 
 
+def list_industry_mapping(*, market="", label_kw="", status="", keyword="", skip=0, limit=50):
+    """委托单例：持仓股票 ⋈ 行业映射的分页查询，返回 (total, items)。"""
+    return get_db().list_industry_mapping(
+        market=market, label_kw=label_kw, status=status, keyword=keyword, skip=skip, limit=limit)
+
+
 def init_db(schema_sql: str) -> None:
     """委托单例：执行建表脚本（幂等）。"""
     get_db().init_db(schema_sql)

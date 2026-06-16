@@ -39,8 +39,8 @@ _RESULT_COLS = [
     'f."fund_type" AS fund_type', 'd."scale" AS scale',
     'd."sharpe_3y" AS sharpe_3y', 'd."sharpe_1y" AS sharpe_1y',
     'd."max_drawdown_3y" AS max_drawdown_3y', 'd."max_drawdown_1y" AS max_drawdown_1y',
-    'd."position_stock" AS position_stock', 'd."return_ytd" AS return_ytd',
-    'd."drawdown_ytd" AS drawdown_ytd',
+    'd."position_stock" AS position_stock', 'd."position_bond" AS position_bond',
+    'd."return_ytd" AS return_ytd', 'd."drawdown_ytd" AS drawdown_ytd',
 ]
 
 # OR 子句切分：逗号后须跟「非括号字符直到 ( 或 字符串结尾」，避免切到 in.(a,b) 内部
@@ -297,6 +297,68 @@ class SqliteDatabase(Database):
         )
         rows = conn.execute(sql, where_params + [limit, skip]).fetchall()
         return total, [dict(row) for row in rows]
+
+    def list_industry_mapping(self, *, market="", label_kw="", status="", keyword="", skip=0, limit=50):
+        # held：持仓股票去重（带簡称），走 (holding_type, asset_code, asset_name) 覆盖索引，免全表扫。
+        # m：LEFT JOIN 行业映射后派生 market（缺映射按代码形态兜底）/ covered（有申万三级或东财）。
+        # 末层再算 label（覆盖时取 申万三级→二级→东财），并把过滤/排序/分页全交给 SQL。
+        base = """
+            WITH held AS (
+                SELECT asset_code AS stock_code, MIN(asset_name) AS held_name
+                FROM fund_holdings WHERE holding_type = 'stock' GROUP BY asset_code
+            ),
+            m AS (
+                SELECT h.stock_code,
+                    COALESCE(NULLIF(si.stock_name, ''), h.held_name, '') AS stock_name,
+                    COALESCE(NULLIF(si.market, ''),
+                        CASE
+                            WHEN h.stock_code GLOB '[0-9][0-9][0-9][0-9][0-9][0-9]' THEN 'A'
+                            WHEN h.stock_code GLOB '[0-9][0-9][0-9][0-9][0-9]' THEN 'HK'
+                            ELSE 'OTHER'
+                        END) AS market,
+                    COALESCE(si.sw_l1, '') AS sw_l1,
+                    COALESCE(si.sw_l2, '') AS sw_l2,
+                    COALESCE(si.sw_l3, '') AS sw_l3,
+                    COALESCE(si.em_industry, '') AS em_industry,
+                    COALESCE(si.source, '') AS source,
+                    COALESCE(si.manual, 0) AS manual,
+                    CASE WHEN COALESCE(si.sw_l3, '') <> '' OR COALESCE(si.em_industry, '') <> ''
+                         THEN 1 ELSE 0 END AS covered
+                FROM held h LEFT JOIN stock_industry si ON si.stock_code = h.stock_code
+            ),
+            r AS (
+                SELECT *,
+                    CASE WHEN covered = 1
+                         THEN COALESCE(NULLIF(sw_l3, ''), NULLIF(sw_l2, ''), NULLIF(em_industry, ''))
+                         ELSE '' END AS label
+                FROM m
+            )
+        """
+        where, params = ["1 = 1"], []
+        if market:
+            where.append("market = ?")
+            params.append(market)
+        if status == "covered":
+            where.append("covered = 1")
+        elif status == "uncovered":
+            where.append("covered = 0")
+        if label_kw:
+            where.append("(sw_l3 || sw_l2 || sw_l1 || em_industry) LIKE ?")
+            params.append(f"%{label_kw}%")
+        if keyword:
+            where.append("(stock_code LIKE ? OR stock_name LIKE ?)")
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        where_sql = " WHERE " + " AND ".join(where)
+        # COUNT(*) OVER () 随行带回过滤后总数，重 CTE+JOIN 只跑一遍（免去单独 COUNT 查询）。
+        sql = (
+            f"{base} SELECT *, COUNT(*) OVER () AS _total FROM r{where_sql} "
+            "ORDER BY covered DESC, stock_code ASC LIMIT ? OFFSET ?"
+        )
+        rows = [dict(row) for row in self._conn().execute(sql, params + [limit, skip]).fetchall()]
+        total = rows[0].pop("_total") if rows else 0
+        for r in rows:
+            r.pop("_total", None)
+        return total, rows
 
     def init_db(self, schema_sql: str) -> None:
         conn = self._conn()

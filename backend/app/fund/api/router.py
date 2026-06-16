@@ -269,6 +269,21 @@ def save_snapshot(preset_id):
     return jsonify({"id": row["id"], "fund_count": len(items)}), 201
 
 
+@bp.get("/<code>/nav")
+def get_nav(code):
+    """某基金最近 N 个交易日的累计净值序列（带日期），供净值走势图。
+
+    返回 ``{items:[{date, nav}]}``，按时间升序；前端按区间切片绘图。
+    """
+    try:
+        limit = int(request.args.get("limit", 750))
+    except (TypeError, ValueError):
+        limit = 750
+    limit = max(2, min(limit, 2000))
+    series = nav_crud.recent_series_dated(code, limit)
+    return jsonify({"items": [{"date": d, "nav": v} for d, v in series]})
+
+
 @bp.get("/<code>")
 def get_one(code):
     """单只基金 + 详情（详情列扁平化合并）+ top-10 股票持仓。"""

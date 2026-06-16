@@ -5,6 +5,7 @@ import { ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import { useScreenData } from './hooks/useScreenData'
 import { buildFundColumns } from '../fund/components/fundColumns'
 import FundDetailModal from '../fund/components/FundDetailModal'
+import NavTrendModal from '../fund/components/NavTrendModal'
 import type { FundItem, QueryPreset } from '../fund/types'
 
 // 镜像基金视图：对比「最新筛选结果」与「已存镜像」，并把当前结果存为镜像。
@@ -20,6 +21,7 @@ export default function MirrorView({
 }) {
   const { latest, snapshot, loading, saving, refresh, saveMirror } = useScreenData(presetId, presets)
   const [detailCode, setDetailCode] = useState<string | null>(null)
+  const [trend, setTrend] = useState<{ code: string; name: string } | null>(null)
 
   const mirrorItems = snapshot?.items ?? []
   const latestCodes = useMemo(() => new Set(latest.map((f) => f.code)), [latest])
@@ -43,7 +45,11 @@ export default function MirrorView({
     statusCol((code) =>
       snapshot && !mirrorCodes.has(code) ? <Tag color="green">新增</Tag> : null,
     ),
-    ...buildFundColumns({ onOpenDetail: setDetailCode, showNav: true }),
+    ...buildFundColumns({
+      onOpenDetail: setDetailCode,
+      onOpenTrend: (code, name) => setTrend({ code, name }),
+      showNav: true,
+    }),
   ]
   const mirrorColumns: ColumnsType<FundItem> = [
     statusCol((code) => (!latestCodes.has(code) ? <Tag color="red">已剔除</Tag> : null)),
@@ -88,7 +94,7 @@ export default function MirrorView({
           loading={loading}
           dataSource={latest}
           columns={latestColumns}
-          scroll={{ x: 1500 }}
+          scroll={{ x: 1826 }}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 只` }}
         />
       </Card>
@@ -109,7 +115,7 @@ export default function MirrorView({
             size="small"
             dataSource={mirrorItems}
             columns={mirrorColumns}
-            scroll={{ x: 1340 }}
+            scroll={{ x: 1706 }}
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 只` }}
           />
         ) : (
@@ -121,6 +127,12 @@ export default function MirrorView({
       </Card>
 
       <FundDetailModal code={detailCode} open={detailCode !== null} onClose={() => setDetailCode(null)} />
+      <NavTrendModal
+        code={trend?.code ?? null}
+        name={trend?.name}
+        open={!!trend}
+        onClose={() => setTrend(null)}
+      />
     </Space>
   )
 }

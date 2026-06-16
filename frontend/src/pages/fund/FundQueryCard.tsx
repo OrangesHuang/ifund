@@ -1,13 +1,18 @@
-import { Button, Card, Collapse, Input, Select, Space, Table } from 'antd'
+import { useState } from 'react'
+import { Alert, Button, Card, Input, Select, Space, Table, Tag } from 'antd'
+import { SaveOutlined } from '@ant-design/icons'
 import type { SorterResult } from 'antd/es/table/interface'
 import MultiCompareFilter from './components/MultiCompareFilter'
 import FundExcludeSelect from './components/FundExcludeSelect'
 import { buildFundColumns } from './components/fundColumns'
+import NavTrendModal from './components/NavTrendModal'
+import PresetNameModal from './components/PresetNameModal'
 import type {
   CompareCondition,
   Filters,
   FundItem,
   FundTypeItem,
+  QueryPreset,
   SortInfo,
 } from './types'
 
@@ -25,6 +30,10 @@ interface Props {
   onSearch: () => void
   onReset: () => void
   onOpenDetail: (code: string) => void
+  activePreset: QueryPreset | null
+  dirty: boolean
+  onSavePreset: (name: string) => void
+  onUpdatePreset: () => void
 }
 
 // 后端 allowed_sort_fields 对应的可排序列
@@ -52,10 +61,21 @@ export default function FundQueryCard({
   onSearch,
   onReset,
   onOpenDetail,
+  activePreset,
+  dirty,
+  onSavePreset,
+  onUpdatePreset,
 }: Props) {
   const sortable = (field: string) => (SORTABLE.has(field) ? true : undefined)
+  const [trend, setTrend] = useState<{ code: string; name: string } | null>(null)
+  const [saveOpen, setSaveOpen] = useState(false)
 
-  const columns = buildFundColumns({ sortable, onOpenDetail, showNav: true })
+  const columns = buildFundColumns({
+    sortable,
+    onOpenDetail,
+    onOpenTrend: (code, name) => setTrend({ code, name }),
+    showNav: true,
+  })
 
   const handleTableChange = (
     _pagination: unknown,
@@ -100,28 +120,48 @@ export default function FundQueryCard({
             查询
           </Button>
           <Button onClick={onReset}>清空</Button>
+
+          <span style={{ width: 1, alignSelf: 'stretch', background: 'rgba(255,255,255,0.12)' }} />
+
+          {activePreset ? (
+            <>
+              <Tag color="blue" style={{ marginInlineEnd: 0 }}>
+                当前预设：{activePreset.name}
+                {dirty && <span style={{ marginLeft: 4, opacity: 0.7 }}>（已改动）</span>}
+              </Tag>
+              {dirty && (
+                <Button type="primary" ghost icon={<SaveOutlined />} onClick={onUpdatePreset}>
+                  更新预设「{activePreset.name}」
+                </Button>
+              )}
+              <Button icon={<SaveOutlined />} onClick={() => setSaveOpen(true)}>
+                另存为新预设
+              </Button>
+            </>
+          ) : (
+            <Button icon={<SaveOutlined />} onClick={() => setSaveOpen(true)}>
+              另存为预设
+            </Button>
+          )}
         </Space>
 
-        <Collapse
-          size="small"
-          items={[
-            {
-              key: 'adv',
-              label: '高级筛选（条件 / 排除）',
-              children: (
-                <Space direction="vertical" className="w-full" style={{ width: '100%' }}>
-                  <MultiCompareFilter value={filters.conditions ?? []} onChange={setConditions} />
-                  <FundExcludeSelect
-                    codes={filters.exclude_codes ?? []}
-                    names={filters.name_excludes ?? []}
-                    onCodesChange={(v) => onFiltersChange({ ...filters, exclude_codes: v })}
-                    onNamesChange={(v) => onFiltersChange({ ...filters, name_excludes: v })}
-                  />
-                </Space>
-              ),
-            },
-          ]}
-        />
+        <div>
+          <div className="mb-2 text-sm font-medium text-gray-400">高级筛选（条件 / 排除）</div>
+          <Space direction="vertical" className="w-full" style={{ width: '100%' }}>
+            <Alert
+              type="info"
+              showIcon
+              message="高级筛选基于基金详情数据。未拉取详情的基金不会出现在高级筛选结果中；若想为新基金补详情，请先用基础条件（类型/关键字）拉取详情，再用高级筛选。"
+            />
+            <MultiCompareFilter value={filters.conditions ?? []} onChange={setConditions} />
+            <FundExcludeSelect
+              codes={filters.exclude_codes ?? []}
+              names={filters.name_excludes ?? []}
+              onCodesChange={(v) => onFiltersChange({ ...filters, exclude_codes: v })}
+              onNamesChange={(v) => onFiltersChange({ ...filters, name_excludes: v })}
+            />
+          </Space>
+        </div>
 
         <Table<FundItem>
           rowKey="code"
@@ -130,7 +170,7 @@ export default function FundQueryCard({
           dataSource={funds}
           columns={columns}
           onChange={handleTableChange}
-          scroll={{ x: 1340 }}
+          scroll={{ x: 1750 }}
           pagination={{
             current: page,
             pageSize,
@@ -141,6 +181,22 @@ export default function FundQueryCard({
           }}
         />
       </Space>
+
+      <NavTrendModal
+        code={trend?.code ?? null}
+        name={trend?.name}
+        open={!!trend}
+        onClose={() => setTrend(null)}
+      />
+      <PresetNameModal
+        open={saveOpen}
+        title="另存为预设"
+        onOk={(name) => {
+          onSavePreset(name)
+          setSaveOpen(false)
+        }}
+        onCancel={() => setSaveOpen(false)}
+      />
     </Card>
   )
 }

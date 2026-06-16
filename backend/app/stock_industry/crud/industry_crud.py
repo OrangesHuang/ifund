@@ -7,31 +7,56 @@
 from __future__ import annotations
 
 import datetime
+import time
 
 from app import db as database
 
 TABLE = "stock_industry"
 
+# 派生集合（持仓全集 / 行业映射索引）的进程内 TTL 缓存。
+# 行业映射页一次开页会并发打 stats / breakdown / list 三个接口，各自要算同样的 held/idx；
+# 缓存把这一阵突发请求收敛成一次计算。持仓变动靠 TTL 自动失效，人工修正即时清缓存。
+_CACHE: dict[str, tuple[float, object]] = {}
+_CACHE_TTL = 30.0  # 秒
+
+
+def _cached(key: str, build):
+    hit = _CACHE.get(key)
+    if hit is not None and (time.monotonic() - hit[0]) < _CACHE_TTL:
+        return hit[1]
+    val = build()
+    _CACHE[key] = (time.monotonic(), val)
+    return val
+
+
+def _invalidate_cache() -> None:
+    """映射数据变动后清空派生缓存（人工修正 / 采集 upsert 调用）。"""
+    _CACHE.clear()
+
 
 def held_codes() -> list[str]:
     """fund_holdings 里去重的股票持仓代码（聚类标的全集）。"""
-    rows = database.select("fund_holdings", {
-        "holding_type": "eq.stock", "select": "DISTINCT asset_code",
-    })
-    return [r["asset_code"] for r in rows if r.get("asset_code")]
+    def build() -> list[str]:
+        rows = database.select("fund_holdings", {
+            "holding_type": "eq.stock", "select": "DISTINCT asset_code",
+        })
+        return [r["asset_code"] for r in rows if r.get("asset_code")]
+    return _cached("held_codes", build)
 
 
 def held_names() -> dict[str, str]:
     """持仓股票代码 → 简称（取任意一条，用于补全无映射记录的名称）。"""
-    rows = database.select("fund_holdings", {
-        "holding_type": "eq.stock", "select": "DISTINCT asset_code, asset_name",
-    })
-    out: dict[str, str] = {}
-    for r in rows:
-        code = r.get("asset_code")
-        if code and code not in out:
-            out[code] = r.get("asset_name") or ""
-    return out
+    def build() -> dict[str, str]:
+        rows = database.select("fund_holdings", {
+            "holding_type": "eq.stock", "select": "DISTINCT asset_code, asset_name",
+        })
+        out: dict[str, str] = {}
+        for r in rows:
+            code = r.get("asset_code")
+            if code and code not in out:
+                out[code] = r.get("asset_name") or ""
+        return out
+    return _cached("held_names", build)
 
 
 def classify_market(code: str) -> str:
@@ -81,6 +106,7 @@ def upsert_industry(code, name, *, market=None, sw=None, em=None, source=""):
         database.update(TABLE, {"stock_code": code}, fields)
     else:
         database.insert(TABLE, {"stock_code": code, "manual": 0, **fields})
+    _invalidate_cache()
 
 
 def sw_covered_l3() -> set[str]:
@@ -112,6 +138,7 @@ def set_manual(code: str, fields: dict) -> None:
         database.update(TABLE, {"stock_code": code}, payload)
     else:
         database.insert(TABLE, {"stock_code": code, **payload})
+    _invalidate_cache()
 
 
 def _label(row: dict) -> str:
@@ -121,7 +148,7 @@ def _label(row: dict) -> str:
 
 
 def _index_by_code() -> dict[str, dict]:
-    return {r["stock_code"]: r for r in database.select(TABLE)}
+    return _cached("index", lambda: {r["stock_code"]: r for r in database.select(TABLE)})
 
 
 def industry_index() -> dict[str, dict]:
@@ -179,36 +206,12 @@ def breakdown(top: int = 0) -> list[dict]:
 
 
 def list_page(*, market="", label_kw="", status="", keyword="", skip=0, limit=50):
-    """分页列出持仓股票的行业映射（内存过滤，表仅数千行）。
+    """分页列出持仓股票的行业映射（过滤/排序/分页下沉 SQL，见 db.list_industry_mapping）。
 
     status: ``covered`` 仅已覆盖 / ``uncovered`` 仅未覆盖 / 空=全部。
     """
-    held = held_codes()
-    held_names_map = held_names()
-    idx = _index_by_code()
-    rows = []
-    for code in held:
-        row = dict(idx.get(code, {}))
-        row.setdefault("stock_code", code)
-        if not row.get("stock_name"):
-            row["stock_name"] = held_names_map.get(code, "")
-        if not row.get("market"):
-            row["market"] = classify_market(code)
-        row["label"] = _label(row) if (row.get("sw_l3") or row.get("em_industry")) else ""
-        row["covered"] = bool(row["label"])
-        rows.append(row)
-    if market:
-        rows = [r for r in rows if r["market"] == market]
-    if status == "covered":
-        rows = [r for r in rows if r["covered"]]
-    elif status == "uncovered":
-        rows = [r for r in rows if not r["covered"]]
-    if label_kw:
-        rows = [r for r in rows if label_kw in (r.get("sw_l3", "") + r.get("sw_l2", "")
-                + r.get("sw_l1", "") + r.get("em_industry", ""))]
-    if keyword:
-        rows = [r for r in rows
-                if keyword in r["stock_code"] or keyword in r.get("stock_name", "")]
-    rows.sort(key=lambda r: (not r["covered"], r["stock_code"]))
-    total = len(rows)
-    return total, rows[skip:skip + limit]
+    total, rows = database.list_industry_mapping(
+        market=market, label_kw=label_kw, status=status, keyword=keyword, skip=skip, limit=limit)
+    for r in rows:
+        r["covered"] = bool(r["covered"])  # SQL 返回 0/1，前端按布尔渲染
+    return total, rows

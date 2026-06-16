@@ -59,5 +59,13 @@ class Database(abc.ABC):
         """funds ⋈ fund_details 联合查询，返回 ``(total, items)``。"""
 
     @abc.abstractmethod
+    def list_industry_mapping(self, *, market="", label_kw="", status="", keyword="", skip=0, limit=50):
+        """持仓股票（fund_holdings 去重）⋈ stock_industry 行业映射的分页查询。
+
+        过滤 / 排序 / 分页全部下沉到 SQL，返回 ``(total, items)``；每行含派生的
+        ``label`` / ``covered`` / ``market``（缺映射时按代码形态兜底）。
+        """
+
+    @abc.abstractmethod
     def init_db(self, schema_sql: str) -> None:
         """执行建表脚本（SQLite 用 executescript）。"""
