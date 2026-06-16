@@ -50,7 +50,12 @@ def upsert_holding():
         mv = float(body.get("market_value") or 0)
     except (TypeError, ValueError):
         return jsonify({"detail": "market_value invalid"}), 400
-    row = holdings_store.upsert_holding(uid, code, body.get("fund_name", ""), mv)
+    cost = body.get("cost")
+    try:
+        cost = float(cost) if cost is not None and cost != "" else None
+    except (TypeError, ValueError):
+        cost = None
+    row = holdings_store.upsert_holding(uid, code, body.get("fund_name", ""), mv, cost)
     return jsonify(row)
 
 
@@ -106,8 +111,9 @@ def run():
     if result is None or not result.get("items"):
         return jsonify({"rows": None, "reason": "有效基金不足（需 ≥3 只含股票持仓的基金），无法生成目标"})
 
+    mode = body.get("mode") if body.get("mode") in ("sleeve", "whole") else "sleeve"
     ind_idx = industry_crud.industry_index()
-    recon = recon_algo.reconcile(result["items"], holdings, cash, band, clusters, ind_idx)
+    recon = recon_algo.reconcile(result["items"], holdings, cash, band, clusters, ind_idx, mode)
     recon["meta"]["cap"] = cap
     recon["meta"]["nav_as_of"] = result["meta"].get("nav_as_of")
     recon["meta"]["holdings_quarter"] = result["meta"].get("holdings_quarter")

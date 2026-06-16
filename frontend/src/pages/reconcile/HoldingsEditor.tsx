@@ -32,10 +32,12 @@ export default function HoldingsEditor({ onChanged }: { onChanged?: () => void }
     load()
   }, [load])
 
-  // 行内改市值：失焦即 upsert
-  const saveValue = async (code: string, name: string, mv: number) => {
+  // 行内改市值：失焦即 upsert（保留原成本）
+  const saveValue = async (code: string, name: string, mv: number, cost?: number | null) => {
     try {
-      await request.post('/reconcile/holdings', { fund_code: code, fund_name: name, market_value: mv })
+      await request.post('/reconcile/holdings', {
+        fund_code: code, fund_name: name, market_value: mv, cost: cost ?? null,
+      })
       onChanged?.()
     } catch {
       message.error('保存失败')
@@ -53,7 +55,8 @@ export default function HoldingsEditor({ onChanged }: { onChanged?: () => void }
     }
   }
 
-  // 粘贴导入：每行「代码<分隔>金额」，分隔符可为 tab/逗号/中文逗号/空白。全量替换。
+  // 粘贴导入：每行「名称/代码 市值 [持有收益]」，分隔符 tab/逗号/中文逗号/空白。全量替换。
+  // 首段为 6 位数字按代码处理、否则按名称反查；其后所有数字中第 1 个为市值、最后 1 个为持有收益。
   const doImport = async () => {
     const rows = pasteText
       .split('\n')
@@ -61,13 +64,24 @@ export default function HoldingsEditor({ onChanged }: { onChanged?: () => void }
       .filter(Boolean)
       .map((line) => {
         const parts = line.split(/[\t,，\s]+/).filter(Boolean)
-        const code = parts[0]
-        const mv = Number(parts[parts.length - 1])
-        return { fund_code: code, market_value: Number.isFinite(mv) ? mv : 0 }
+        const first = parts[0] || ''
+        const nums = parts
+          .slice(1)
+          .map((p) => Number(p.replace(/[+,，]/g, '')))
+          .filter((n) => Number.isFinite(n))
+        const mv = nums.length ? nums[0] : 0
+        const pnl = nums.length >= 2 ? nums[nums.length - 1] : undefined   // 持有收益（可负）
+        const cost = pnl !== undefined ? mv - pnl : undefined              // 成本=市值−持有收益
+        const isCode = /^\d{6}$/.test(first)
+        return {
+          ...(isCode ? { fund_code: first } : { fund_name: first }),
+          market_value: mv,
+          ...(cost !== undefined ? { cost } : {}),
+        }
       })
-      .filter((r) => r.fund_code && r.market_value > 0)
+      .filter((r) => (r.fund_code || r.fund_name) && r.market_value > 0)
     if (rows.length === 0) {
-      message.warning('未解析到有效行（格式：基金代码 金额，每行一只）')
+      message.warning('未解析到有效行（格式：名称或代码 市值 [持有收益]，每行一只）')
       return
     }
     setImporting(true)
@@ -135,6 +149,25 @@ export default function HoldingsEditor({ onChanged }: { onChanged?: () => void }
                 ),
               },
               {
+                title: '持有收益（元）',
+                dataIndex: 'cost',
+                width: 130,
+                align: 'right',
+                render: (_: unknown, row) => {
+                  if (row.cost === null || row.cost === undefined) {
+                    return <Typography.Text type="secondary">—</Typography.Text>
+                  }
+                  const pnl = (row.market_value || 0) - row.cost
+                  const color = pnl > 0 ? '#f5222d' : pnl < 0 ? '#52c41a' : undefined
+                  return (
+                    <span style={{ color }}>
+                      {pnl > 0 ? '+' : ''}
+                      {pnl.toLocaleString('zh-CN', { maximumFractionDigits: 0 })}
+                    </span>
+                  )
+                },
+              },
+              {
                 title: '操作',
                 width: 70,
                 align: 'center',
@@ -154,13 +187,13 @@ export default function HoldingsEditor({ onChanged }: { onChanged?: () => void }
           <Alert
             type="info"
             showIcon
-            message="每行一只基金，格式「基金代码 金额」，分隔符支持空格 / 逗号 / Tab。可直接从 Excel 复制两列粘贴。导入为全量替换（覆盖现有持仓）。"
+            message="每行一只基金，格式「名称或代码 市值 [持有收益]」，分隔符支持空格 / 逗号 / Tab。可直接从基金 App 复制（名称、市值、持有收益三列）粘贴；只看得到名称没有代码时按名称自动反查。持有收益可省略；成本=市值−持有收益，仅展示不参与调仓决策。导入为全量替换（覆盖现有持仓）。"
           />
           <TextArea
             rows={6}
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
-            placeholder={'示例：\n000001 30000\n110011,15000\n005827\t8000'}
+            placeholder={'示例（名称 市值 持有收益）：\n中欧红利优享 50467 +3200\n易方达蓝筹 15000 -800\n000001 30000'}
           />
           <Button type="primary" icon={<ImportOutlined />} loading={importing} onClick={doImport}>
             解析并导入

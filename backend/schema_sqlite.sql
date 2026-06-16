@@ -195,6 +195,7 @@ CREATE TABLE IF NOT EXISTS user_holdings (
     fund_code TEXT NOT NULL,
     fund_name TEXT DEFAULT '',
     market_value REAL NOT NULL DEFAULT 0,   -- 当前市值（元）
+    cost REAL,                              -- 持仓成本（元）；NULL=未提供。盈亏=市值−成本，仅展示不参与调仓决策
     updated_at TEXT DEFAULT (datetime('now')),
     UNIQUE (user_id, fund_code)
 );

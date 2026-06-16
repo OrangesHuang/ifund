@@ -20,6 +20,8 @@ const ReconcileView = forwardRef<
   const [band, setBand] = useState(0.03)
   // 均衡强度 cap：与仓位建议一致，默认「紧」0.14。
   const [cap, setCap] = useState(0.14)
+  // 模式：子仓位（默认，赛道外保留不动）/ 整盘（赛道外清仓、按全账户迁移）。
+  const [mode, setMode] = useState<'sleeve' | 'whole'>('sleeve')
 
   useEffect(() => {
     setResult(null)
@@ -38,6 +40,7 @@ const ReconcileView = forwardRef<
         cash,
         band,
         cap,
+        mode,
       })
       setResult(data)
     } catch {
@@ -45,7 +48,7 @@ const ReconcileView = forwardRef<
     } finally {
       setLoading(false)
     }
-  }, [presetId, cash, band, cap])
+  }, [presetId, cash, band, cap, mode])
 
   // 工作台预设变化时不自动对账（持仓/现金是用户输入，需手动触发）；仅暴露给父组件备用。
   useImperativeHandle(ref, () => ({ run }), [run])
@@ -59,7 +62,7 @@ const ReconcileView = forwardRef<
       <Alert
         type="info"
         showIcon
-        message="实盘对账：把③仓位建议的目标权重落到你的真实持仓上。按「赛道（聚类簇）」对齐，不强制你换成系统选的代表基金——只看每个赛道总仓位够不够。先在下方导入持仓、填可投现金，再点「开始对账」，系统按总资产分配目标、用缓冲带抑制噪音，算出每个赛道该加/减/建/清多少钱。仅供参考、非投资建议。"
+        message="实盘对账：把③仓位建议的目标权重落到你的真实持仓上。按「赛道（聚类簇）」对齐，不强制你换成系统选的代表基金——只看每个赛道总仓位够不够。默认「子仓位」模式：把所选预设当成账户里的一个子仓位，只调能对上赛道的基金，赛道外的保留不动（不建议清仓）。先在下方导入持仓（可含持有收益，盈亏仅展示不参与决策）、填可投现金，再点「开始对账」。仅供参考、非投资建议。"
       />
 
       <HoldingsEditor onChanged={() => setResult(null)} />
@@ -78,7 +81,21 @@ const ReconcileView = forwardRef<
               addonAfter="元"
             />
           </span>
-          <Tooltip title="缓冲带：目标与实际的偏离在「总资产 × 此比例」以内就保持不动，抑制短期噪音、保持调仓连贯。宽松=更少折腾，灵敏=更贴目标。">
+          <Tooltip title="子仓位：把预设当成账户里的一个子仓位，只调能对上赛道的基金，赛道外保留不动、目标按「匹配市值+现金」分配。整盘：把整个账户向目标迁移，赛道外建议清仓、目标按「全账户+现金」分配。">
+            <span>
+              模式：
+              <Segmented
+                style={{ marginLeft: 8 }}
+                value={mode}
+                onChange={(v) => setMode(v as 'sleeve' | 'whole')}
+                options={[
+                  { label: '子仓位', value: 'sleeve' },
+                  { label: '整盘', value: 'whole' },
+                ]}
+              />
+            </span>
+          </Tooltip>
+          <Tooltip title="缓冲带：目标与实际的偏离在「基准资产 × 此比例」以内就保持不动，抑制短期噪音、保持调仓连贯。宽松=更少折腾，灵敏=更贴目标。">
             <span>
               缓冲带：
               <Segmented

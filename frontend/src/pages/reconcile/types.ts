@@ -5,12 +5,13 @@ export interface UserHolding {
   id?: number
   fund_code: string
   fund_name: string
-  market_value: number   // 当前市值（元）
+  market_value: number      // 当前市值（元）
+  cost?: number | null      // 持仓成本（元）；null=未提供。盈亏=市值−成本
   updated_at?: string
 }
 
-// 对账动作：建仓 / 加仓 / 减仓 / 不动 / 清仓
-export type ReconAction = 'open' | 'add' | 'trim' | 'hold' | 'exit'
+// 对账动作：建仓 / 加仓 / 减仓 / 不动 / 清仓 / 保留（子仓位模式下的赛道外）
+export type ReconAction = 'open' | 'add' | 'trim' | 'hold' | 'exit' | 'keep'
 
 // 赛道归类方式：代码命中 / 主体名命中 / 行业相似 / 赛道外 / 无持仓数据
 export type ReconMatch = 'exact' | 'name' | 'similar' | 'outside' | 'no_data' | null
@@ -20,6 +21,8 @@ export interface ReconUserFund {
   code: string
   name: string
   market_value: number
+  cost?: number | null
+  pnl?: number | null      // 未实现盈亏（市值−成本）
   match: Exclude<ReconMatch, null>
   sim: number
 }
@@ -36,6 +39,7 @@ export interface ReconRow {
   weight: number          // 目标占比（小数）
   target: number          // 目标市值（元）
   actual: number          // 当前市值（元）
+  pnl?: number | null     // 该赛道未实现盈亏（仅展示）
   target_fund: ReconFundRef   // 建议操作/买入的基金
   user_funds: ReconUserFund[] // 该赛道下已持有的基金
   match: ReconMatch
@@ -51,18 +55,26 @@ export interface ReconCounts {
   trim: number
   hold: number
   exit: number
+  keep: number
 }
 
 export interface ReconSummary {
-  total_asset: number     // 总资产 = 持仓市值 + 可投现金
-  held_total: number      // 当前持仓总市值
+  mode: 'sleeve' | 'whole'
+  base_asset: number      // 目标分配基准（子仓位=匹配市值+现金）
+  total_asset: number     // 总资产 = 全部持仓市值 + 可投现金
+  held_total: number      // 当前持仓总市值（含赛道外）
+  matched_total: number   // 对上赛道的持仓市值
   cash: number            // 可投现金
   outside_value: number   // 赛道外持仓市值
   buy_total: number       // 建议买入合计
-  sell_total: number      // 建议卖出合计（含清仓）
+  sell_total: number      // 建议卖出合计
   leftover_cash: number   // 配平后剩余现金
-  band: number            // 缓冲带（占总资产比例）
+  band: number            // 缓冲带（占基准比例）
   scaled: boolean         // 是否因资金不足等比缩减了买入
+  has_cost: boolean       // 是否有成本数据
+  pnl_total: number | null    // 有成本部分的未实现盈亏（仅展示）
+  return_pct: number | null   // 有成本部分的收益率%（仅展示）
+  cost_covered_mv: number     // 有成本的持仓市值
   counts: ReconCounts
 }
 

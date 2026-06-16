@@ -11,7 +11,11 @@ const ACTION_META: Record<ReconAction, { label: string; color: string }> = {
   trim: { label: '减仓', color: 'default' },
   exit: { label: '清仓', color: 'default' },
   hold: { label: '不动', color: 'default' },
+  keep: { label: '保留', color: 'blue' },
 }
+
+// 无需执行的动作：复制时跳过
+const PASSIVE: ReconAction[] = ['hold', 'keep']
 
 const MATCH_LABEL: Record<Exclude<ReconMatch, null>, string> = {
   exact: '代码命中',
@@ -28,7 +32,7 @@ export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
   // 复制：赛道\t动作\t金额\t操作基金，方便粘贴到 Excel 执行
   const copyAll = () => {
     const text = rows
-      .filter((r) => r.action !== 'hold')
+      .filter((r) => !PASSIVE.includes(r.action))
       .map((r) => {
         const verb = r.amount >= 0 ? '补' : '减'
         return `${r.cluster_name}\t${ACTION_META[r.action].label}\t${verb}${yuan(r.amount)}\t${r.target_fund.name}（${r.target_fund.code}）`
@@ -90,6 +94,22 @@ export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
               r.cluster_id === null ? '—' : `${(v * 100).toFixed(1)}%`,
           },
           {
+            title: '盈亏',
+            dataIndex: 'pnl',
+            width: 110,
+            align: 'right',
+            render: (v: number | null | undefined) => {
+              if (v === null || v === undefined) return <Typography.Text type="secondary">—</Typography.Text>
+              const color = v > 0 ? '#f5222d' : v < 0 ? '#52c41a' : undefined
+              return (
+                <span style={{ color }}>
+                  {v > 0 ? '+' : ''}
+                  {yuan(v)}
+                </span>
+              )
+            },
+          },
+          {
             title: '动作',
             dataIndex: 'action',
             width: 80,
@@ -102,7 +122,7 @@ export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
             width: 130,
             align: 'right',
             render: (v: number, r) => {
-              if (r.action === 'hold') return <Typography.Text type="secondary">—</Typography.Text>
+              if (r.action === 'hold' || r.action === 'keep') return <Typography.Text type="secondary">—</Typography.Text>
               const buy = v >= 0
               return (
                 <b style={{ color: buy ? BUY : SELL }}>
