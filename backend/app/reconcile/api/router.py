@@ -125,10 +125,11 @@ def get_snapshot():
 @bp.get("/holdings/clusters")
 @jwt_required()
 def get_holdings_clusters():
-    """实际持仓基金 → 所属赛道（簇）名 映射（需实盘已关联预设）。query: ``?portfolio_id=``。
+    """实际持仓基金 → 所属赛道（簇）映射（需实盘已关联预设）。query: ``?portfolio_id=``。
 
-    返回 ``{has_preset, map: {fund_code: cluster_name}}``；归类失败的基金标「赛道外」。
-    复用对账同款聚类与归类逻辑（compute_position + classify），仅用于展示。
+    返回 ``{has_preset, map: {fund_code: cluster_id|null}, clusters: {cluster_id: {seq, label, industries}}}``。
+    ``seq`` 为簇序号（簇1、簇2…，按目标权重降序）；``industries`` 为带占比的申万三级行业 top3。
+    归类失败的基金 map 值为 null（赛道外）。复用对账同款聚类与归类逻辑，仅用于展示。
     """
     uid = preset_access.current_user_id()
     pf, error = _resolve_portfolio(uid)
@@ -137,25 +138,37 @@ def get_holdings_clusters():
         return jsonify(payload), status
     preset_id = pf.get("preset_id")
     if not preset_id:
-        return jsonify({"has_preset": False, "map": {}})
+        return jsonify({"has_preset": False, "map": {}, "clusters": {}})
     items = preset_access.snapshot_items(preset_id, uid)
     if items is None:
-        return jsonify({"has_preset": True, "map": {}})
+        return jsonify({"has_preset": True, "map": {}, "clusters": {}})
     result, clusters = compute_position(items, optimize.DEFAULT_CAP)
     if result is None or not result.get("items"):
-        return jsonify({"has_preset": True, "map": {}})
+        return jsonify({"has_preset": True, "map": {}, "clusters": {}})
     code2cluster = classify.build_code_to_cluster(clusters)
     name2cluster = classify.build_name_index(clusters)
     cluster_vecs = classify.cluster_vectors(clusters)
-    cid2name = {it["cluster_id"]: it.get("cluster_name", "") for it in result["items"]}
+    cid2cluster = {c["cluster_id"]: c for c in clusters}
+    # 簇序号：按目标 items 顺序（权重降序）从 1 开始编号
+    clusters_out: dict[str, dict] = {}
+    for seq, it in enumerate(result["items"], start=1):
+        cid = it["cluster_id"]
+        c = cid2cluster.get(cid, {})
+        industries = [{"label": i["label"], "ratio": i["ratio"]}
+                      for i in (c.get("top_industries") or [])[:3]]
+        clusters_out[str(cid)] = {
+            "seq": seq,
+            "label": it.get("cluster_name", ""),
+            "industries": industries,
+        }
     ind_idx = industry_crud.industry_index()
-    out: dict[str, str] = {}
+    out: dict[str, int | None] = {}
     for h in holdings_compute.compute_holdings(pf["id"]):
         cid, _match, _sim = classify.classify_fund(
             h["fund_code"], h.get("fund_name", ""),
             code2cluster, name2cluster, cluster_vecs, ind_idx)
-        out[h["fund_code"]] = cid2name.get(cid, "赛道外") if cid is not None else "赛道外"
-    return jsonify({"has_preset": True, "map": out})
+        out[h["fund_code"]] = cid if (cid is not None and str(cid) in clusters_out) else None
+    return jsonify({"has_preset": True, "map": out, "clusters": clusters_out})
 
 
 @bp.post("/holdings")

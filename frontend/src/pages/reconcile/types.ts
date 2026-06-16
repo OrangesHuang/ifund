@@ -47,6 +47,13 @@ export interface Txn {
   note?: string
 }
 
+// 簇（赛道）展示元信息：序号 + 名称 + 带占比的申万三级行业 top3
+export interface ClusterMeta {
+  seq: number
+  label: string
+  industries: { label: string; ratio: number }[]
+}
+
 // 对账动作：建仓 / 加仓 / 减仓 / 不动 / 清仓 / 保留（子仓位模式下的赛道外）
 export type ReconAction = 'open' | 'add' | 'trim' | 'hold' | 'exit' | 'keep'
 
