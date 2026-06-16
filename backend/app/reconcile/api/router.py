@@ -91,7 +91,11 @@ def clear_holdings():
 @bp.post("/run")
 @jwt_required()
 def run():
-    """对账。body: ``{preset_id, cap?, cash?, band?}``。返回 ``{rows, summary, meta}``。"""
+    """对账。body: ``{preset_id, cap?, band?, sell_outside?, trim_overflow?}``。
+
+    两个正交开关覆盖四类操作意图；现金由系统反推（"加满还差多少"），无需预填。
+    返回 ``{rows, summary, meta, transfers}``。
+    """
     items, error = preset_access.resolve_items("rows")
     if error:
         payload, status = error
@@ -100,20 +104,22 @@ def run():
     uid = preset_access.current_user_id()
     holdings = holdings_store.list_holdings(uid)
     if not holdings:
-        return jsonify({"rows": None, "reason": "尚未导入任何实盘持仓，请先在「持仓录入」录入"})
+        return jsonify({"rows": None, "reason": "尚未导入任何实盘持仓，请先在「实盘持仓」录入"})
 
     body = request.get_json(silent=True) or {}
     cap = _clamp(body.get("cap"), CAP_MIN, CAP_MAX, optimize.DEFAULT_CAP)
     band = _clamp(body.get("band"), BAND_MIN, BAND_MAX, recon_algo.DEFAULT_BAND)
-    cash = _clamp(body.get("cash"), 0.0, 1e12, 0.0)
+    sell_outside = bool(body.get("sell_outside"))
+    trim_overflow = body.get("trim_overflow")
+    trim_overflow = True if trim_overflow is None else bool(trim_overflow)
 
     result, clusters = compute_position(items, cap)
     if result is None or not result.get("items"):
         return jsonify({"rows": None, "reason": "有效基金不足（需 ≥3 只含股票持仓的基金），无法生成目标"})
 
-    mode = body.get("mode") if body.get("mode") in ("sleeve", "whole", "swap") else "sleeve"
     ind_idx = industry_crud.industry_index()
-    recon = recon_algo.reconcile(result["items"], holdings, cash, band, clusters, ind_idx, mode)
+    recon = recon_algo.reconcile(result["items"], holdings, clusters, ind_idx,
+                                 band=band, sell_outside=sell_outside, trim_overflow=trim_overflow)
     recon["meta"]["cap"] = cap
     recon["meta"]["nav_as_of"] = result["meta"].get("nav_as_of")
     recon["meta"]["holdings_quarter"] = result["meta"].get("holdings_quarter")
