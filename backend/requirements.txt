@@ -3,7 +3,9 @@ flask-sqlalchemy==3.1.1
 flask-jwt-extended==4.7.1
 bcrypt==4.2.0
 python-dotenv==1.0.1
-pydantic==2.9.2
+pydantic>=2.11           # 放宽：需与 mcp 兼容（旧 pin 2.9.2 会破坏 MCP 服务器）
 requests
 akshare
 pandas
+waitress>=3.0           # 生产级 WSGI（常驻后端用，替代 flask 调试服务器）
+mcp[cli]>=1.27          # MCP 服务器（mcp_server/，与后端共用本 venv；连带 httpx）
