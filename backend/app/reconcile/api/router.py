@@ -182,8 +182,11 @@ def upsert_holding():
         return jsonify(payload), status
     body = request.get_json(silent=True) or {}
     code = str(body.get("fund_code") or "").strip()
+    name = str(body.get("fund_name") or "").strip()
+    if not code and name:   # 只给名称时反查代码（与交易记录录入一致，便于 App 复制名称）
+        code, name = holdings_store.resolve_by_name(name)
     if not code:
-        return jsonify({"detail": "fund_code required"}), 400
+        return jsonify({"detail": "fund_code or fund_name required"}), 400
     try:
         mv = float(body.get("market_value") or 0)
     except (TypeError, ValueError):
@@ -193,7 +196,7 @@ def upsert_holding():
         cost = float(cost) if cost is not None and cost != "" else None
     except (TypeError, ValueError):
         cost = None
-    row = holdings_store.upsert_holding(pf["id"], uid, code, body.get("fund_name", ""), mv, cost)
+    row = holdings_store.upsert_holding(pf["id"], uid, code, name, mv, cost)
     return jsonify(row)
 
 

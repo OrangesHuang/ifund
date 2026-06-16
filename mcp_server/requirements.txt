@@ -1,0 +1,4 @@
+# iFund MCP 服务器依赖（装进后端同一 venv：backend/venv）
+#   backend/venv/bin/python -m pip install -r mcp_server/requirements.txt
+# mcp 会一并带来 httpx（HTTP 客户端）与 pydantic 等。
+mcp[cli]>=1.27
