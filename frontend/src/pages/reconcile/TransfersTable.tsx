@@ -5,6 +5,7 @@ import request from '../../api/request'
 import type { ReconTransfer } from './types'
 
 const yuan = (v: number) => v.toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+const share = (v: number) => v.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
 
 const BUY = '#fa541c'   // 建仓/加仓/转入：橙
 const SRC = '#722ed1'   // 资金来源基金：紫
@@ -20,7 +21,8 @@ function sentence(t: ReconTransfer): string {
     return `${to} ${act} ${yuan(t.amount)} 元（现金）`
   }
   // 赛道内超配减仓 / 赛道外卖出 → 转仓到目标基金
-  return `${fundLabel(t.from_name, t.from_code)} 转仓 ${yuan(t.amount)} 元 至 ${to}（${act}）`
+  const sh = t.from_shares ? `（约 ${share(t.from_shares)} 份）` : ''
+  return `${fundLabel(t.from_name, t.from_code)} 转仓 ${yuan(t.amount)} 元${sh} 至 ${to}（${act}）`
 }
 
 // 操作指南：每行一句调仓者习惯的「A 转仓 X元 至 B / C 建仓 X元」。
@@ -83,7 +85,11 @@ export default function TransfersTable({
       <span style={{ lineHeight: 1.6 }}>
         {fromTag}
         <b style={{ color: SRC }}>{fundLabel(t.from_name, t.from_code)}</b>{' '}
-        转仓 <b style={{ color: BUY }}>{yuan(t.amount)} 元</b> 至 {to}{' '}
+        转仓 <b style={{ color: BUY }}>{yuan(t.amount)} 元</b>
+        {t.from_shares != null && (
+          <span style={{ color: '#999', marginLeft: 4 }}>≈ {share(t.from_shares)} 份</span>
+        )}{' '}
+        至 {to}{' '}
         <Tag color={t.to_action === 'open' ? 'volcano' : 'orange'} style={{ marginLeft: 4 }}>
           {act}
         </Tag>
@@ -118,6 +124,7 @@ export default function TransfersTable({
         按调仓顺序执行：「来源基金 转仓 金额 至 目标基金」表示把来源基金赎回同等金额、申购到目标基金；
         「目标基金 建仓/加仓 金额（现金）」表示用追加现金买入。资金来源优先级（尽量不用现金）：
         赛道内超配减仓 → 赛道外卖出 → 追加现金兜底。
+        券商「基金转换」按份额操作，故附「≈ 份额」= 转仓金额 ÷ 转出基金最新单位净值（估算，实际以确认日净值为准）。
       </Typography.Paragraph>
       <Table<ReconTransfer>
         size="small"

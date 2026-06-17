@@ -73,6 +73,7 @@ def reconcile(target_items: list[dict], holdings: list[dict],
     per_cost_full: dict[int, bool] = {}    # 该赛道是否每只都有成本
     cluster_user_funds: dict[int, list[dict]] = {}
     outside: list[dict] = []
+    nav_by_code: dict[str, float] = {}     # 转出基金最新单位净值 → 估算转出份额
     match_counts = {"exact": 0, "name": 0, "similar": 0, "outside": 0, "no_data": 0}
     held_total = cost_total = pnl_known_mv = 0.0
     has_any_cost = False
@@ -83,6 +84,9 @@ def reconcile(target_items: list[dict], holdings: list[dict],
         cost = h.get("cost")
         cost = float(cost) if cost is not None else None
         name = h.get("fund_name") or ""
+        nav = h.get("latest_nav")
+        if code and nav:
+            nav_by_code[code] = float(nav)
         held_total += mv
         if cost is not None:
             has_any_cost = True
@@ -199,12 +203,20 @@ def reconcile(target_items: list[dict], holdings: list[dict],
             s = sources[si]
             take = min(remain, s["avail"])
             if take >= MIN_TRADE_YUAN:
-                transfers.append({
+                amount = round(take, 2)
+                from_nav = nav_by_code.get(s["code"])
+                tr = {
                     "from_type": s["type"], "from_code": s["code"], "from_name": s["name"],
                     "from_cluster": s["cluster"], "to_code": need["to_code"],
                     "to_name": need["to_name"], "to_cluster": need["cluster_name"],
-                    "to_action": "open" if need["is_open"] else "add", "amount": round(take, 2),
-                })
+                    "to_action": "open" if need["is_open"] else "add", "amount": amount,
+                }
+                # 转出份额（券商「基金转换」按份额操作）：金额 ÷ 转出基金最新单位净值。
+                # 追加现金来源无转出基金，跳过。
+                if s["code"] and from_nav:
+                    tr["from_nav"] = round(from_nav, 4)
+                    tr["from_shares"] = round(amount / from_nav, 2)
+                transfers.append(tr)
                 if s["type"] == "outside":
                     used_outside[s["code"]] = used_outside.get(s["code"], 0.0) + take
                 elif s["type"] == "trim":

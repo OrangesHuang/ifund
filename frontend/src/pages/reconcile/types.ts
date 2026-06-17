@@ -113,6 +113,8 @@ export interface ReconTransfer {
   to_cluster: string
   to_action: 'open' | 'add'
   amount: number
+  from_nav?: number       // 转出基金最新单位净值（追加现金来源无此字段）
+  from_shares?: number    // 估算转出份额 = amount ÷ from_nav（券商「基金转换」按份额操作）
 }
 
 export interface ReconSummary {
