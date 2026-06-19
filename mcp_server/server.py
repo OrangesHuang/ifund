@@ -138,6 +138,30 @@ def _resolve_cap(balance: str, cap: float | None) -> float:
                             _BALANCE_CAP.get((balance or "").strip(), _DEFAULT_CAP))
 
 
+def _industry_index() -> dict[str, dict]:
+    """全量拉取股票→行业映射，建 ``stock_code → 行（含 sw_l3/stock_name）`` 索引。
+
+    穿透按申万三级聚合用；list 接口不支持按代码批量查，故一次性分页拉全量（page_size 500）
+    在本地建索引，避免逐股查询的 N×10 次往返。
+    """
+    idx: dict[str, dict] = {}
+    page = 1
+    while True:
+        res = _call("GET", "/api/stock_industry/list",
+                    params={"page": str(page), "page_size": "500"})
+        rows = res.get("items") if isinstance(res, dict) else None
+        if not isinstance(rows, list) or not rows:
+            break
+        for r in rows:
+            code = r.get("stock_code")
+            if code:
+                idx[code] = r
+        if len(rows) < 500:
+            break
+        page += 1
+    return idx
+
+
 # ════════════════════════════════════════════════ 1) 基础能力
 
 @mcp.tool()
@@ -688,6 +712,94 @@ def apply_rebalance(portfolio_id: int, transfers: list[dict],
     if trade_date:
         body["trade_date"] = trade_date
     return _call("POST", "/api/reconcile/txns/from-rebalance", json_body=body)
+
+
+@mcp.tool()
+def get_portfolio_penetration(portfolio_id: int) -> Any:
+    """计算实盘的底层持仓穿透：前十大持仓 → 按申万三级行业聚合，看组合真实押在哪些行业/股票。
+
+    遍历该实盘所有有效持仓（market_value>0），对每只基金按其在组合中的权重，把前十大股票
+    持仓穿透累加：``某股票穿透仓位 = 基金权重 × 该股在基金中的占净值比例``；再按申万三级（sw_l3）
+    聚合。同一股票被多只基金持有会累加并记录各来源基金。无法映射到申万三级的股票归入
+    ``uncovered_stocks``（可用 fetch_data(industry_*) 补采后重算）。
+
+    复用 get_holdings / get_fund_detail / list_stock_industry 三个能力的同源后端数据。
+    返回 ``{portfolio_id, total_market_value, visible_market_value, penetration, uncovered_stocks}``：
+    - total_market_value：组合有效持仓总市值；visible_market_value：能取到前十大持仓的基金市值合计。
+    - penetration：按 total_ratio 降序的行业列表，每项 ``{industry, total_ratio(占整个组合的小数,
+      如 0.0885=8.85%), visible_ratio(占已映射行业之和), stock_count, stocks:[{stock_code, stock_name,
+      ratio(该股穿透占比), funds:[{fund_code, fund_name, fund_weight, stock_ratio_in_fund(%)}]}]}``。
+    - uncovered_stocks：未映射到申万三级的股票（含穿透占比），按 ratio 降序。
+    """
+    res = _call("GET", "/api/reconcile/holdings", params={"portfolio_id": portfolio_id})
+    holdings = res.get("items") if isinstance(res, dict) else res
+    if not isinstance(holdings, list):
+        return res
+    funds = [h for h in holdings if (h.get("market_value") or 0) > 0]
+    total_mv = sum(h.get("market_value") or 0 for h in funds)
+    empty = {"portfolio_id": portfolio_id, "total_market_value": round(total_mv, 2),
+             "visible_market_value": 0.0, "penetration": [], "uncovered_stocks": []}
+    if total_mv <= 0:
+        return empty
+
+    idx = _industry_index()
+    stock_agg: dict[str, dict] = {}
+    visible_mv = 0.0
+    for h in funds:
+        fcode = h.get("fund_code")
+        weight = (h.get("market_value") or 0) / total_mv
+        detail = _call("GET", f"/api/fund/{fcode}")
+        rows = detail.get("holdings") if isinstance(detail, dict) else None
+        stocks = [s for s in (rows or [])
+                  if s.get("holding_type") == "stock" and (s.get("asset_code") or "").strip()]
+        if not stocks:
+            continue
+        visible_mv += h.get("market_value") or 0
+        for s in stocks:
+            scode = s["asset_code"].strip()
+            hold_ratio = s.get("hold_ratio") or 0.0       # 占净值比例（百分比，如 8.5）
+            slot = stock_agg.setdefault(scode, {
+                "stock_code": scode, "stock_name": s.get("asset_name") or scode,
+                "ratio": 0.0, "funds": []})
+            slot["ratio"] += weight * hold_ratio / 100.0   # 穿透占比（相对整个组合的小数）
+            slot["funds"].append({
+                "fund_code": fcode, "fund_name": h.get("fund_name") or fcode,
+                "fund_weight": round(weight, 6),
+                "stock_ratio_in_fund": round(hold_ratio, 2)})
+
+    industry_agg: dict[str, dict] = {}
+    uncovered: list[dict] = []
+    for s in stock_agg.values():
+        s["ratio"] = round(s["ratio"], 6)
+        s["funds"].sort(key=lambda f: f["stock_ratio_in_fund"], reverse=True)
+        sw_l3 = (idx.get(s["stock_code"]) or {}).get("sw_l3")
+        if not sw_l3:
+            uncovered.append({"stock_code": s["stock_code"],
+                              "stock_name": s["stock_name"], "ratio": s["ratio"]})
+            continue
+        slot = industry_agg.setdefault(sw_l3, {"industry": sw_l3, "total_ratio": 0.0, "stocks": []})
+        slot["total_ratio"] += s["ratio"]
+        slot["stocks"].append(s)
+
+    covered_sum = sum(g["total_ratio"] for g in industry_agg.values())
+    penetration = []
+    for g in industry_agg.values():
+        g["stocks"].sort(key=lambda x: x["ratio"], reverse=True)
+        penetration.append({
+            "industry": g["industry"],
+            "total_ratio": round(g["total_ratio"], 6),
+            "visible_ratio": round(g["total_ratio"] / covered_sum, 6) if covered_sum else 0.0,
+            "stock_count": len(g["stocks"]),
+            "stocks": g["stocks"],
+        })
+    penetration.sort(key=lambda x: x["total_ratio"], reverse=True)
+    uncovered.sort(key=lambda x: x["ratio"], reverse=True)
+
+    return {"portfolio_id": portfolio_id,
+            "total_market_value": round(total_mv, 2),
+            "visible_market_value": round(visible_mv, 2),
+            "penetration": penetration,
+            "uncovered_stocks": uncovered}
 
 
 if __name__ == "__main__":

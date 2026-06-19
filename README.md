@@ -55,7 +55,7 @@ ifund/
 │              · cluster(聚类) · position(仓位建议) · reconcile(实盘对账)
 │              · routers/auth(登录 + PAT) · db(数据库抽象) · common(worker/任务)
 ├── frontend/           前端 React + Vite（基金/筛选/聚类/仓位/行业/实盘/交易日历/令牌）
-├── mcp_server/         MCP 服务器（把核心能力暴露给 OpenClaw 等 agent，共 32 工具）
+├── mcp_server/         MCP 服务器（把核心能力暴露给 OpenClaw 等 agent，共 33 工具）
 ├── ARCHITECTURE.md     高保真架构文档
 ├── start.sh            一键启动（调试：热重载后端 :8000 + 前端 dev :9000）
 ├── service.sh          常驻服务管理（生产：launchd + waitress，开机自启 + 崩溃自愈）
@@ -122,12 +122,12 @@ python3.12 -m venv venv
 
 ## 🤖 MCP / OpenClaw 集成
 
-后端核心能力通过 MCP 服务器（`mcp_server/`）开放给本机 agent，**共 32 个工具，分四大能力组**：
+后端核心能力通过 MCP 服务器（`mcp_server/`）开放给本机 agent，**共 33 个工具，分四大能力组**：
 
 1. **基础**：基金查询/详情、统一拉取入口（详情/持仓/净值/交易日历/行业映射）、拉取任务查询与终止、行业覆盖率/未覆盖定位。
 2. **条件预设**：预设增删改查、镜像快照查询与更新。
 3. **组合分析**：行业暴露聚类、簇级仓位建议（均衡强度 松/中/紧）。
-4. **实盘**：实盘 CRUD、持仓快照（按金额+收益，名称可反查代码）、交易记录 CRUD、对账生成操作指南（赛道外可卖 / 超配可减 / 缓冲带 / 均衡强度均有默认值）、建议一键落账。
+4. **实盘**：实盘 CRUD、持仓快照（按金额+收益，名称可反查代码）、交易记录 CRUD、对账生成操作指南（赛道外可卖 / 超配可减 / 缓冲带 / 均衡强度均有默认值）、建议一键落账、底层持仓穿透（前十大→申万三级行业聚合）。
 
 认证用**个人访问令牌（PAT）**：在网页端「访问令牌」页创建（明文仅显示一次），MCP 服务器自动用 PAT 换短期 JWT 调用后端，绑定用户实现多用户隔离。MCP 与后端共用 `backend/venv`。
 
@@ -142,4 +142,4 @@ python3.12 -m venv venv
 ## 📄 文档
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 完整技术架构、数据模型、接口契约、从零复原步骤
-- [mcp_server/README.md](./mcp_server/README.md) — MCP 服务器配置与 32 工具清单
+- [mcp_server/README.md](./mcp_server/README.md) — MCP 服务器配置与 33 工具清单

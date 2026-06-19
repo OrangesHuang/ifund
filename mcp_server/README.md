@@ -44,7 +44,7 @@ backend/venv/bin/python -m pip install -r mcp_server/requirements.txt
 }
 ```
 
-## 提供的工具（共 32 个，按四大能力组）
+## 提供的工具（共 33 个，按四大能力组）
 
 `conds` 元素形如 `"sharpe_3y:gte:1"`（字段:操作符:值；操作符 `gt/gte/lt/lte/eq/neq`）。
 标 **【会写库】** 的工具会改动数据；拉取类任务同类互斥，已有运行中返回 `{"_error":409}`。
@@ -93,6 +93,7 @@ backend/venv/bin/python -m pip install -r mcp_server/requirements.txt
 - `delete_txn(portfolio_id, txn_id)` — **【会写库】** 删一条交易记录
 - `run_reconcile(portfolio_id, balance, cap, band, sell_outside, trim_overflow, preset_id)` — 生成调仓操作指南（四个旋钮均有默认值）
 - `apply_rebalance(portfolio_id, transfers, trade_date)` — **【会写库】** 把 `run_reconcile` 的换仓建议一键落成交易记录
+- `get_portfolio_penetration(portfolio_id)` — 实盘底层持仓穿透：前十大持仓按目标权重穿透累加、按申万三级行业聚合（行业/股票穿透占比 + 来源基金 + 未覆盖股票）
 
 ## 本地手动测试
 
