@@ -179,6 +179,18 @@ export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
               r.cluster_id === null ? '—' : `${(v * 100).toFixed(1)}%`,
           },
           {
+            title: (
+              <Tooltip title="该赛道当前市值占总持仓市值（含赛道外）的比例，与目标占比对照看偏离。">
+                <span>实际占比 ⓘ</span>
+              </Tooltip>
+            ),
+            dataIndex: 'actual_ratio',
+            width: 90,
+            align: 'right',
+            render: (v: number | null | undefined) =>
+              v === null || v === undefined ? '—' : `${(v * 100).toFixed(1)}%`,
+          },
+          {
             title: '盈亏',
             dataIndex: 'pnl',
             width: 110,

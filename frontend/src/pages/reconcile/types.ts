@@ -83,6 +83,7 @@ export interface ReconRow {
   weight: number          // 目标占比（小数）
   target: number          // 目标市值（元）
   actual: number          // 当前市值（元）
+  actual_ratio: number    // 实际占比 = 当前市值 / 总持仓市值（含赛道外，全表≈100%）
   pnl?: number | null     // 该赛道未实现盈亏（仅展示）
   target_fund: ReconFundRef   // 建议操作/买入的基金
   user_funds: ReconUserFund[] // 该赛道下已持有的基金

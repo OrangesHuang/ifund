@@ -14,12 +14,12 @@ export default function ReconcileView({
 }: { portfolioId: number | null; hasPreset: boolean; onSavedTxns?: () => void }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ReconResult | null>(null)
-  // 缓冲带：偏离在盘子的此比例内则保持不动（抗短期噪音、保调仓连贯）。默认标准 3%。
-  const [band, setBand] = useState(0.03)
-  // 均衡强度 cap：与仓位建议一致，默认「紧」0.14。
-  const [cap, setCap] = useState(0.14)
-  // 开关一：赛道外是否可卖去补缺口（false=保留不动）。默认保留。
-  const [sellOutside, setSellOutside] = useState(false)
+  // 缓冲带：偏离在盘子的此比例内则保持不动（抗短期噪音、保调仓连贯）。默认灵敏 1.5%。
+  const [band, setBand] = useState(0.015)
+  // 均衡强度 cap：与仓位建议一致，默认「松」0.22。
+  const [cap, setCap] = useState(0.22)
+  // 开关一：赛道外是否可卖去补缺口（false=保留不动）。默认可卖补仓。
+  const [sellOutside, setSellOutside] = useState(true)
   // 开关二：赛道内超配是否可减（true=削峰填谷 / false=不减只往上加）。默认可减（最省）。
   const [trimOverflow, setTrimOverflow] = useState(true)
 
