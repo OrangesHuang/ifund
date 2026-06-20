@@ -7,9 +7,15 @@ from app import db as database
 
 
 def latest_trade_date() -> str:
-    """交易日历最大日期；无则今天。"""
-    row = database.select_one("trade_dates", {"order": "trade_date.desc"})
-    return row["trade_date"] if row else datetime.date.today().isoformat()
+    """≤今天的最近交易日；无则今天。
+
+    交易日历预填整年（含未来交易日），不能直接取最大日期，否则会拿到
+    年底这类未来日期，污染 fund_details.trade_date 并使「按交易日过期」判据失效。
+    """
+    today = datetime.date.today().isoformat()
+    row = database.select_one(
+        "trade_dates", {"trade_date": f"lte.{today}", "order": "trade_date.desc"})
+    return row["trade_date"] if row else today
 
 
 def stored_latest(code: str, table: str):
@@ -49,6 +55,32 @@ def latest_unit_nav(code: str) -> tuple[str, float] | None:
     if row and row.get("nav") is not None:
         return row["trade_date"], row["nav"]
     return None
+
+
+def ytd_return(code: str) -> float | None:
+    """用本地净值自算「今年以来」涨幅（%）：上年末 → 最新的累计净值区间收益。
+
+    数据源（akshare）给的 return_ytd 是采集时点的滞后快照，常与最新净值对不上；
+    本地净值天天增量更新，自算可保证「最近交易日」口径、永不滞后。
+    累计净值 acc_nav 含分红、区间收益更准；缺失回退单位净值 nav。无数据返回 None。
+    """
+    year_end_prev = f"{datetime.date.today().year - 1}-12-31"
+    base = database.select_one("fund_nav", [
+        ("fund_code", f"eq.{code}"),
+        ("trade_date", f"lte.{year_end_prev}"),
+        ("order", "trade_date.desc"),
+    ])
+    last = database.select_one("fund_nav", [
+        ("fund_code", f"eq.{code}"),
+        ("order", "trade_date.desc"),
+    ])
+    if not base or not last:
+        return None
+    base_nav = base.get("acc_nav") or base.get("nav")
+    last_nav = last.get("acc_nav") or last.get("nav")
+    if not base_nav or not last_nav:
+        return None
+    return round((last_nav / base_nav - 1) * 100, 4)
 
 
 def recent_series(code: str, limit: int = 120) -> list[float]:

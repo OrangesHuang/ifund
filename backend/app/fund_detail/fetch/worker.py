@@ -18,6 +18,7 @@ from app.common import worker_base
 from app.fund_detail.crud import detail_crud
 from app.fund_detail.fetch import mapper
 from app.fund_nav.crud import nav_crud
+from app.trade_calendar.crud import calendar_crud
 
 
 def _try(func, code):
@@ -28,7 +29,7 @@ def _try(func, code):
 
 
 def _process_one(code):
-    latest = nav_crud.latest_trade_date()
+    latest = calendar_crud.base_trade_date()  # 保守基准交易日，统一缓存判据
     if not detail_crud.is_expired(code, latest):
         return "skip"
     basic = _try(ak.fund_individual_basic_info_xq, code)
@@ -38,6 +39,10 @@ def _process_one(code):
     if basic is None and analysis is None and achievement is None:
         return "fail"
     columns = mapper.map_all(basic, hold, analysis, achievement, latest)
+    # 今年以来收益改用本地净值自算（数据源快照常滞后，与最新净值对不上）
+    ytd = nav_crud.ytd_return(code)
+    if ytd is not None:
+        columns["return_ytd"] = ytd
     detail_crud.upsert(code, columns)
     return "success"
 

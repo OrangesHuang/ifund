@@ -18,6 +18,7 @@ import akshare as ak  # pylint: disable=import-error
 
 from app.common import worker_base
 from app.fund_nav.crud import nav_crud
+from app.trade_calendar.crud import calendar_crud
 
 
 def _acc_nav_map(code):
@@ -71,9 +72,9 @@ def _cum_rows(code, stored, now):
 
 
 def _process_one(code):
-    latest = nav_crud.latest_trade_date()
+    base = calendar_crud.base_trade_date()  # 保守基准交易日：当天未发布则取 T-1，不空拉
     nav_stored = nav_crud.stored_latest(code, "fund_nav")
-    if nav_stored and nav_stored >= latest:
+    if base and nav_stored and nav_stored >= base:
         return "skip"
     now = datetime.datetime.now().isoformat()
     nav_crud.insert_rows("fund_nav", _nav_rows(code, nav_stored, now))

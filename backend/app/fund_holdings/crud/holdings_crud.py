@@ -1,15 +1,19 @@
-"""持仓数据访问：7 天缓存判定 + 按基金全量替换。"""
+"""持仓数据访问：按基准交易日缓存判定 + 按基金全量替换。"""
 from __future__ import annotations
 
 import datetime
 
 from app import db as database
-
-CACHE_DAYS = 7
+from app.trade_calendar.crud import calendar_crud
 
 
 def is_fresh(code: str) -> bool:
-    """该基金持仓是否在 7 天缓存内。"""
+    """该基金持仓是否在当前基准交易日内已拉过（同一基准交易日不重复拉）。
+
+    持仓是季度披露数据，但缓存判据与净值/详情统一到「保守基准交易日」：把上次 fetch_time
+    归一到它所属的基准交易日，与当前基准交易日相等即视为已拉、跳过；跨交易日才重拉
+    （季报多数时候增量为空，成本可控）。无 fetch_time / 无交易日历 → 不新鲜，照常拉。
+    """
     row = database.select_one("fund_holdings", {
         "fund_code": f"eq.{code}", "order": "fetch_time.desc",
     })
@@ -19,7 +23,10 @@ def is_fresh(code: str) -> bool:
         fetched = datetime.datetime.fromisoformat(row["fetch_time"])
     except (TypeError, ValueError):
         return False
-    return (datetime.datetime.now() - fetched).days < CACHE_DAYS
+    base_now = calendar_crud.base_trade_date()
+    if base_now is None:
+        return False
+    return calendar_crud.base_trade_date(fetched) == base_now
 
 
 def upsert(code: str, rows: list[dict]) -> None:
