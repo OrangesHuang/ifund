@@ -1,5 +1,7 @@
 // fund 模块共享类型
 
+import type { FundAi } from './aiMeta'
+
 export interface HoldingItem {
   asset_code: string
   asset_name: string
@@ -25,6 +27,7 @@ export interface FundItem {
   position_bond: number | null
   holdings?: HoldingItem[]
   nav_series?: number[]
+  ai?: FundAi | null
   [key: string]: unknown
 }
 
@@ -68,6 +71,10 @@ export interface Filters {
   exclude_codes?: string[]
   name_excludes?: string[]
   conditions?: CompareCondition[]
+  // AI 定性分析筛选（多选枚举 + 仅看推荐）
+  luck_verdict?: string[]
+  concentration?: string[]
+  recommend?: boolean
 }
 
 export interface SortInfo {

@@ -51,6 +51,9 @@ function ClusterFunds({ row }: { row: ReconRow }) {
               <span>
                 {f.name}{' '}
                 <span style={{ fontFamily: 'monospace', color: '#999' }}>{f.code}</span>
+                {row.cluster_id !== null && f.code === row.target_fund.code && (
+                  <Tag color="gold" style={{ marginLeft: 6 }}>目标</Tag>
+                )}
               </span>
             ),
           },
@@ -142,7 +145,30 @@ export default function ReconcileTable({ rows }: { rows: ReconRow[] }) {
             title: '赛道',
             dataIndex: 'cluster_name',
             render: (v: string, r) =>
-              r.cluster_id === null ? <Tag color="default">赛道外</Tag> : <span>{v}</span>,
+              r.cluster_id === null ? (
+                <Tag color="default">赛道外</Tag>
+              ) : (
+                <Space size={2} direction="vertical" style={{ lineHeight: 1.3 }}>
+                  <span>
+                    {r.seq != null && (
+                      <Tag color="blue" style={{ fontWeight: 600, marginRight: 6 }}>簇{r.seq}</Tag>
+                    )}
+                    {r.industries && r.industries.length > 0
+                      ? r.industries.map((ind, i) => (
+                          <span key={ind.label}>
+                            {i > 0 && <span style={{ color: '#bbb' }}> / </span>}
+                            {ind.label}
+                            <span style={{ color: '#999' }}>{ind.ratio.toFixed(1)}%</span>
+                          </span>
+                        ))
+                      : v}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#999' }}>
+                    目标占比 {(r.weight * 100).toFixed(1)}%
+                    {r.actual_ratio != null && ` · 实际占比 ${(r.actual_ratio * 100).toFixed(1)}%`}
+                  </span>
+                </Space>
+              ),
           },
           {
             title: (

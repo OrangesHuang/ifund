@@ -20,8 +20,12 @@ function sentence(t: ReconTransfer): string {
   if (t.from_type === 'add_cash') {
     return `${to} ${act} ${yuan(t.amount)} 元（现金）`
   }
-  // 赛道内超配减仓 / 赛道外卖出 → 转仓到目标基金
   const sh = t.from_shares ? `（约 ${share(t.from_shares)} 份）` : ''
+  if (t.from_type === 'replace') {
+    // 簇内标的替换：把非目标基金换成本簇目标基金（等额、不改赛道仓位）
+    return `${fundLabel(t.from_name, t.from_code)} 换成目标基金 ${to}，转仓 ${yuan(t.amount)} 元${sh}（${act}）`
+  }
+  // 赛道内超配减仓 / 赛道外卖出 → 转仓到目标基金
   return `${fundLabel(t.from_name, t.from_code)} 转仓 ${yuan(t.amount)} 元${sh} 至 ${to}（${act}）`
 }
 
@@ -80,7 +84,9 @@ export default function TransfersTable({
     }
     const fromTag = t.from_type === 'outside'
       ? <Tag color="purple">赛道外</Tag>
-      : <Tag color="gold">超配减仓</Tag>
+      : t.from_type === 'replace'
+        ? <Tag color="cyan">标的替换</Tag>
+        : <Tag color="gold">超配减仓</Tag>
     return (
       <span style={{ lineHeight: 1.6 }}>
         {fromTag}
@@ -123,7 +129,8 @@ export default function TransfersTable({
       <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: -4 }}>
         按调仓顺序执行：「来源基金 转仓 金额 至 目标基金」表示把来源基金赎回同等金额、申购到目标基金；
         「目标基金 建仓/加仓 金额（现金）」表示用追加现金买入。资金来源优先级（尽量不用现金）：
-        赛道内超配减仓 → 赛道外卖出 → 追加现金兜底。
+        赛道内超配减仓 → 赛道外卖出 → 追加现金兜底。「标的替换」= 把簇内非目标基金换成本簇目标基金
+        （即便它收益更高，也按目标标的归一；等额换手、不改变赛道仓位）。
         券商「基金转换」按份额操作，故附「≈ 份额」= 转仓金额 ÷ 转出基金最新单位净值（估算，实际以确认日净值为准）。
       </Typography.Paragraph>
       <Table<ReconTransfer>

@@ -29,16 +29,17 @@ def create_portfolio(uid: int, name: str, preset_id: int | None = None) -> dict:
     """新建实盘。"""
     name = (name or "").strip() or "未命名实盘"
     return database.insert(TABLE, {
-        "user_id": uid, "name": name, "preset_id": preset_id,
+        "user_id": uid, "name": name, "preset_id": preset_id, "cap": 0.18,
     })
 
 
 def update_portfolio(pid: int, uid: int, *, name: str | None = None,
-                     preset_id: int | None = None, set_preset: bool = False) -> dict | None:
-    """改名 / 关联预设；需校验归属。
+                     preset_id: int | None = None, set_preset: bool = False,
+                     cap: float | None = None) -> dict | None:
+    """改名 / 关联预设 / 均衡强度；需校验归属。
 
     ``set_preset=True`` 时才更新 preset_id（允许显式置空为「取消关联」）；
-    否则仅在 name 非空时改名。
+    ``cap`` 非空时更新均衡强度上限；否则仅在 name 非空时改名。
     """
     row = get_portfolio(pid, uid)
     if not row:
@@ -48,6 +49,8 @@ def update_portfolio(pid: int, uid: int, *, name: str | None = None,
         fields["name"] = name.strip()
     if set_preset:
         fields["preset_id"] = preset_id
+    if cap is not None:
+        fields["cap"] = cap
     if not fields:
         return row
     database.update(TABLE, {"id": pid}, fields)

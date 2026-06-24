@@ -26,14 +26,45 @@ def owned_preset(preset_id: int, user_id: int):
     })
 
 
-def snapshot_items(preset_id: int, user_id: int) -> list[dict] | None:
-    """返回该预设镜像的 items 列表；无镜像返回 None。"""
+def exclude_rules(preset_id: int, user_id: int) -> tuple[set[str], list[str]]:
+    """从预设 filters 解析「过滤名单」：精确排除代码集合 + 名称排除关键字。
+
+    过滤名单与基金查询页的「排除代码/排除名称」复用同一份 ``filters.exclude_codes`` /
+    ``filters.name_excludes``，故工作台移入过滤 = 改预设这两个字段。
+    """
+    preset = owned_preset(preset_id, user_id)
+    filters = json.loads(preset.get("filters_json") or "{}") if preset else {}
+    codes = {str(c) for c in (filters.get("exclude_codes") or [])}
+    name_kws = [str(k) for k in (filters.get("name_excludes") or []) if str(k).strip()]
+    return codes, name_kws
+
+
+def apply_exclude(items: list[dict], codes: set[str], name_kws: list[str]) -> list[dict]:
+    """剔除命中过滤名单的基金（代码精确 / 名称含关键字），与 /fund/list 排除语义一致。"""
+    def keep(it: dict) -> bool:
+        if it.get("code") in codes:
+            return False
+        name = it.get("name") or ""
+        return not any(kw in name for kw in name_kws)
+    return [it for it in items if keep(it)]
+
+
+def snapshot_items(preset_id: int, user_id: int, with_exclude: bool = True) -> list[dict] | None:
+    """返回该预设镜像的 items 列表；无镜像返回 None。
+
+    ``with_exclude=True``（默认，聚类/仓位等下游用）时，按预设过滤名单实时剔除——
+    这样在工作台把基金移入过滤名单后，无需重建镜像即可让下游分析立刻不含该基金。
+    """
     snapshot = database.select_one("fund_snapshots", {
         "user_id": f"eq.{user_id}", "preset_id": f"eq.{preset_id}",
     })
     if not snapshot:
         return None
-    return json.loads(snapshot.get("items_json") or "[]")
+    items = json.loads(snapshot.get("items_json") or "[]")
+    if with_exclude:
+        codes, name_kws = exclude_rules(preset_id, user_id)
+        items = apply_exclude(items, codes, name_kws)
+    return items
 
 
 def resolve_items(none_key: str):
@@ -54,6 +85,25 @@ def resolve_items(none_key: str):
     if items is None:
         return None, ({none_key: None, "reason": "该预设尚无镜像快照，请先在筛选页保存镜像"}, 200)
     return items, None
+
+
+def ai_public(row: dict | None) -> dict | None:
+    """剥离 fund_ai_analysis 的内部列（id/fund_code），返回前端可用的子对象。"""
+    if not row:
+        return None
+    return {k: v for k, v in row.items() if k not in ("id", "fund_code")}
+
+
+def ai_by_codes(codes: list[str]) -> dict[str, dict]:
+    """批量取一批基金的 AI 定性分析：返回 ``{code: public_ai_dict}``，未分析的不在 dict 内。
+
+    与基金列表页 ``_attach_ai`` 同源，供仓位建议等下游就地展示 AI 评价。
+    """
+    uniq = sorted({str(c) for c in codes if c})
+    if not uniq:
+        return {}
+    rows = database.select("fund_ai_analysis", {"fund_code": f"in.({','.join(uniq)})"})
+    return {r["fund_code"]: ai_public(r) for r in rows}
 
 
 def build_metrics(items: list[dict]) -> dict[str, dict]:

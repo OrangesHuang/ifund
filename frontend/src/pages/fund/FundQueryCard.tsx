@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Alert, Button, Card, Input, Select, Space, Table, Tag } from 'antd'
+import { Alert, Button, Card, Checkbox, Input, Select, Space, Table, Tag } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import type { SorterResult } from 'antd/es/table/interface'
 import MultiCompareFilter from './components/MultiCompareFilter'
@@ -36,7 +36,7 @@ interface Props {
   onUpdatePreset: () => void
 }
 
-// 后端 allowed_sort_fields 对应的可排序列
+// 后端 allowed_sort_fields + ai_sort_fields 对应的可排序列
 const SORTABLE = new Set([
   'scale',
   'return_ytd',
@@ -45,7 +45,21 @@ const SORTABLE = new Set([
   'sharpe_1y',
   'max_drawdown_3y',
   'position_stock',
+  // AI 定性分析（fund_ai_analysis）
+  'skill_score',
+  'rating',
 ])
+
+const LUCK_OPTIONS = [
+  { label: '实力', value: 'solid' },
+  { label: '中性', value: 'mixed' },
+  { label: '运气', value: 'luck' },
+]
+const CONC_OPTIONS = [
+  { label: '单押', value: 'single_bet' },
+  { label: '集中', value: 'focused' },
+  { label: '分散', value: 'diversified' },
+]
 
 export default function FundQueryCard({
   funds,
@@ -75,6 +89,7 @@ export default function FundQueryCard({
     onOpenDetail,
     onOpenTrend: (code, name) => setTrend({ code, name }),
     showNav: true,
+    showAi: true,
   })
 
   const handleTableChange = (
@@ -154,6 +169,34 @@ export default function FundQueryCard({
               message="高级筛选基于基金详情数据。未拉取详情的基金不会出现在高级筛选结果中；若想为新基金补详情，请先用基础条件（类型/关键字）拉取详情，再用高级筛选。"
             />
             <MultiCompareFilter value={filters.conditions ?? []} onChange={setConditions} />
+            <Space wrap align="center">
+              <span className="text-sm text-gray-400">AI 定性</span>
+              <Select
+                mode="multiple"
+                placeholder="运气/实力"
+                value={filters.luck_verdict}
+                onChange={(v) => onFiltersChange({ ...filters, luck_verdict: v })}
+                options={LUCK_OPTIONS}
+                style={{ minWidth: 160 }}
+                allowClear
+              />
+              <Select
+                mode="multiple"
+                placeholder="集中度"
+                value={filters.concentration}
+                onChange={(v) => onFiltersChange({ ...filters, concentration: v })}
+                options={CONC_OPTIONS}
+                style={{ minWidth: 160 }}
+                allowClear
+              />
+              <Checkbox
+                checked={!!filters.recommend}
+                onChange={(e) => onFiltersChange({ ...filters, recommend: e.target.checked })}
+              >
+                仅看推荐
+              </Checkbox>
+              <span className="text-xs text-gray-500">（选择 AI 条件即只显示已分析基金）</span>
+            </Space>
             <FundExcludeSelect
               codes={filters.exclude_codes ?? []}
               names={filters.name_excludes ?? []}
@@ -170,7 +213,7 @@ export default function FundQueryCard({
           dataSource={funds}
           columns={columns}
           onChange={handleTableChange}
-          scroll={{ x: 1750 }}
+          scroll={{ x: 2240 }}
           pagination={{
             current: page,
             pageSize,

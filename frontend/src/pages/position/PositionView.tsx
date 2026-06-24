@@ -2,6 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useState, forwardRef } fro
 import { Alert, Button, Card, Empty, Segmented, Space, Spin, Table, Tag, Tooltip, message } from 'antd'
 import { ClockCircleOutlined, CopyOutlined, ExperimentOutlined, FundOutlined } from '@ant-design/icons'
 import request from '../../api/request'
+import { CONC_META, KIND_META, LUCK_META, metaOf } from '../fund/aiMeta'
 import PositionRow from './PositionRow'
 import PortfolioCharts from './PortfolioCharts'
 import LookthroughCard from './LookthroughCard'
@@ -260,6 +261,32 @@ const PositionView = forwardRef<
                   width: 110,
                   align: 'right',
                   render: (w: number) => <b>{(w * 100).toFixed(1)}%</b>,
+                },
+                {
+                  title: 'AI 定性',
+                  key: 'ai',
+                  width: 210,
+                  render: (_: unknown, it) => {
+                    const ai = it.fund.ai
+                    if (!ai) return <span style={{ color: '#bfbfbf' }}>未分析</span>
+                    const luck = metaOf(LUCK_META, ai.luck_verdict)
+                    const conc = metaOf(CONC_META, ai.concentration)
+                    const kind = metaOf(KIND_META, ai.fund_kind)
+                    return (
+                      <Space size={4} wrap>
+                        {ai.rating != null && (
+                          <span style={{ color: '#fadb14', letterSpacing: 1 }}>
+                            {'★'.repeat(Math.max(0, Math.min(3, Number(ai.rating)))) || '·'}
+                          </span>
+                        )}
+                        {ai.skill_score != null && <span style={{ color: '#8c8c8c' }}>{ai.skill_score}</span>}
+                        {luck && <Tag color={luck.color} style={{ marginInlineEnd: 0 }}>{luck.label}</Tag>}
+                        {conc && <Tag color={conc.color} style={{ marginInlineEnd: 0 }}>{conc.label}</Tag>}
+                        {kind && <Tag color={kind.color} style={{ marginInlineEnd: 0 }}>{kind.label}</Tag>}
+                        {ai.recommend === 0 && <Tag color="red" style={{ marginInlineEnd: 0 }}>不建议</Tag>}
+                      </Space>
+                    )
+                  },
                 },
               ]}
             />

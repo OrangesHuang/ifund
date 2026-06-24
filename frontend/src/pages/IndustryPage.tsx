@@ -89,7 +89,7 @@ export default function IndustryPage() {
   const loadStats = useCallback(async () => {
     const [s, b] = await Promise.all([
       request.get<Stats>('/stock_industry/stats'),
-      request.get<BreakdownItem[]>('/stock_industry/breakdown', { params: { top: 20 } }),
+      request.get<BreakdownItem[]>('/stock_industry/breakdown', { params: { top: 0 } }),
     ])
     setStats(s.data)
     setBreakdown(b.data)
@@ -377,15 +377,22 @@ export default function IndustryPage() {
         </Col>
       </Row>
 
-      <Card size="small" title="行业分布（持仓标的数 Top 20，用于直观分析聚类粒度）">
-        <Space wrap size={[8, 8]}>
-          {breakdown.length === 0 && <span style={{ color: '#999' }}>暂无数据，先执行采集</span>}
-          {breakdown.map((b) => (
-            <Tag key={b.label} color={b.label === '未覆盖' ? 'red' : 'blue'}>
-              {b.label} · {b.count}
-            </Tag>
-          ))}
-        </Space>
+      <Card
+        size="small"
+        title={`行业分布（持仓标的数，按聚类标签全量，共 ${
+          breakdown.filter((b) => b.label !== '未覆盖').length
+        } 个行业，用于直观分析聚类粒度）`}
+      >
+        <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+          <Space wrap size={[8, 8]}>
+            {breakdown.length === 0 && <span style={{ color: '#999' }}>暂无数据，先执行采集</span>}
+            {breakdown.map((b) => (
+              <Tag key={b.label} color={b.label === '未覆盖' ? 'red' : 'blue'}>
+                {b.label} · {b.count}
+              </Tag>
+            ))}
+          </Space>
+        </div>
       </Card>
 
       <Card

@@ -77,6 +77,16 @@ def run():
     result, _ = compute_position(items, _resolve_cap())
     if result is None:
         return jsonify({"items": None, "reason": "有效基金不足（需 ≥3 只含股票持仓的基金）"})
+
+    # 给每簇代表基金挂 AI 定性分析，供前端就地展示（运气/实力、集中度、结论等）
+    pos_items = result.get("items") or []
+    ai_map = preset_access.ai_by_codes([
+        it["fund"]["code"] for it in pos_items if it.get("fund")
+    ])
+    for it in pos_items:
+        fund = it.get("fund")
+        if fund:
+            fund["ai"] = ai_map.get(fund["code"])
     return jsonify(result)
 
 

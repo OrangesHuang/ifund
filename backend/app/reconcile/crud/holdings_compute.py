@@ -75,27 +75,33 @@ def compute_holdings(pid: int) -> list[dict]:
         if share_mode:
             shares = base_shares or 0.0
             cost = base_cost if base_cost is not None else (base_mv if snap else 0.0)
+            realized_pnl = 0.0
+            total_invested = cost if cost else 0.0
             for t in ts:
                 if not t.get("fund_name") or not name:
                     name = name or t.get("fund_name") or ""
                 if t["txn_type"] == "buy":
                     shares += t["shares"]
                     cost += t["amount"]
+                    total_invested += t["amount"]
                 else:  # sell
                     if shares > 0:
                         avg = cost / shares
                         sold = min(t["shares"], shares)
+                        realized_pnl += t["amount"] - avg * sold
                         cost -= avg * sold
                         shares -= sold
             hit = nav_crud.latest_unit_nav(code)
             if hit:
                 nav_date, latest_nav = hit
                 mv = shares * latest_nav
+                unrealized = mv - cost if cost is not None else None
+                total_pnl = round(realized_pnl + (unrealized or 0), 2) if cost is not None else None
                 out.append({
                     "fund_code": code, "fund_name": name,
                     "market_value": round(mv, 2), "cost": round(cost, 2) if cost is not None else None,
                     "shares": round(shares, 4), "latest_nav": latest_nav, "nav_date": nav_date,
-                    "pnl": round(mv - cost, 2) if cost is not None else None,
+                    "pnl": total_pnl, "total_invested": round(total_invested, 2),
                     "valuation_ok": True,
                 })
                 continue
@@ -107,13 +113,63 @@ def compute_holdings(pid: int) -> list[dict]:
         sell_amt = sum(t["amount"] for t in ts if t["txn_type"] == "sell")
         mv = base_mv + buy_amt - sell_amt
         cost = ((base_cost if base_cost is not None else base_mv) + buy_amt - sell_amt) if snap or ts else None
+        total_invested = (base_cost if base_cost is not None else base_mv) + buy_amt if snap or ts else 0.0
         out.append({
             "fund_code": code, "fund_name": name,
             "market_value": round(mv, 2), "cost": round(cost, 2) if cost is not None else None,
             "shares": None, "latest_nav": None, "nav_date": None,
             "pnl": round(mv - cost, 2) if cost is not None else None,
+            "total_invested": round(total_invested, 2),
             "valuation_ok": False,
         })
 
     out.sort(key=lambda h: h["market_value"], reverse=True)
     return out
+
+
+def penetrate_holdings(pid: int) -> dict | None:
+    """实际持仓底层穿透：各基金前十大持仓按市值权重穿透累加，聚合到申万三级行业/个股。
+
+    每只股票占整个组合的比例 = Σ(基金市值权重 × 该股占该基金净值%)。返回
+    ``{portfolio_id, total_market_value, visible_position_pct, industries:[{industry,ratio,stock_count}],
+    stocks:[{code,name,industry,ratio,fund_count,funds:[{fund,fund_weight,stock_ratio}]}]}``；
+    无有效持仓返回 None。CLI 与网页端共用此函数，避免穿透逻辑两处实现。
+    """
+    from app.fund_holdings.crud import holdings_crud
+    from app.stock_industry.crud import industry_crud
+
+    holdings = [h for h in compute_holdings(pid) if (h.get("market_value") or 0) > 0]
+    total_mv = sum(h["market_value"] for h in holdings)
+    if total_mv <= 0:
+        return None
+    ind_idx = industry_crud.industry_index()
+    stock_agg: dict[str, dict] = {}
+    for h in holdings:
+        w = h["market_value"] / total_mv  # 基金市值权重（小数）
+        for s in holdings_crud.top_holdings(h["fund_code"], "stock"):
+            scode = (s.get("asset_code") or "").strip()
+            if not scode:
+                continue
+            sratio = s.get("hold_ratio") or 0.0  # 占该基金净值 %
+            slot = stock_agg.setdefault(scode, {
+                "code": scode, "name": s.get("asset_name") or scode,
+                "industry": industry_crud.label_of(scode, ind_idx), "ratio": 0.0, "funds": []})
+            slot["ratio"] += w * sratio  # 占整个组合 %
+            slot["funds"].append({"fund": h["fund_name"], "fund_weight": round(w * 100, 2),
+                                  "stock_ratio": round(sratio, 2)})
+    stocks = sorted(stock_agg.values(), key=lambda x: x["ratio"], reverse=True)
+    for s in stocks:
+        s["ratio"] = round(s["ratio"], 3)
+        s["fund_count"] = len(s["funds"])
+    ind_agg: dict[str, dict] = {}
+    for s in stocks:
+        slot = ind_agg.setdefault(s["industry"],
+                                  {"industry": s["industry"], "ratio": 0.0, "stock_count": 0})
+        slot["ratio"] += s["ratio"]
+        slot["stock_count"] += 1
+    industries = sorted(ind_agg.values(), key=lambda x: x["ratio"], reverse=True)
+    for x in industries:
+        x["ratio"] = round(x["ratio"], 3)
+    return {"portfolio_id": pid, "total_market_value": round(total_mv, 2),
+            "visible_position_pct": round(sum(s["ratio"] for s in stocks), 2),
+            "industries": industries, "stocks": stocks}

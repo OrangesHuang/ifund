@@ -27,6 +27,9 @@ function normalizeFilters(f: Filters): string {
         `${a.field}${a.op}${a.value}`.localeCompare(`${b.field}${b.op}${b.value}`),
     )
   }
+  if (f.luck_verdict?.length) out.luck_verdict = [...f.luck_verdict].sort()
+  if (f.concentration?.length) out.concentration = [...f.concentration].sort()
+  if (f.recommend) out.recommend = true
   return JSON.stringify(out)
 }
 
@@ -49,6 +52,9 @@ export function buildFilterParams(filters: Filters): Record<string, string> {
       .map((c) => `${c.field}:${c.op}:${c.value}`)
       .join(',')
   }
+  if (filters.luck_verdict?.length) params.luck_verdict = filters.luck_verdict.join(',')
+  if (filters.concentration?.length) params.concentration = filters.concentration.join(',')
+  if (filters.recommend) params.recommend = '1'
   return params
 }
 
@@ -85,6 +91,7 @@ export function useFundData() {
         limit: String(pageSize),
         attach_holdings: '1',
         attach_nav: '1',
+        attach_ai: '1',
       }
       if (sorters.length) {
         const s = sorters[0]

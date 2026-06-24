@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Alert, Button, Card, Divider, Input, Modal, Popconfirm, Select, Space, Tabs, Tag, Typography, message,
+  Alert, Button, Card, Divider, Input, Modal, Popconfirm, Segmented, Select, Space, Tabs, Tag, Typography, message,
 } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import request from '../../api/request'
 import type { QueryPreset } from '../fund/types'
 import type { Portfolio } from './types'
 import HoldingsManager from './HoldingsManager'
+import HoldingsPenetration from './HoldingsPenetration'
 import ReconcileView from './ReconcileView'
 
 // 实盘：一站式独立板块。选实盘 → 关联仓位建议（预设）→ 录入持仓 → 生成操作指南。
@@ -47,14 +48,27 @@ export default function HoldingsPage() {
       .catch(() => undefined)
   }, [loadPortfolios])
 
-  // 关联预设：PATCH 实盘
+  // 关联预设：PATCH 实盘（预设影响目标比例，需触发持仓重算）
   const linkPreset = async (presetId: number | null) => {
     if (!pid) return
     try {
       await request.patch(`/reconcile/portfolios/${pid}`, { preset_id: presetId })
       setPortfolios((prev) => prev.map((p) => (p.id === pid ? { ...p, preset_id: presetId } : p)))
+      setReloadSignal((s) => s + 1)
     } catch {
       message.error('关联预设失败')
+    }
+  }
+
+  // 均衡强度：PATCH 实盘（cap 影响目标基金筛选，需触发持仓重算）
+  const linkCap = async (cap: number) => {
+    if (!pid) return
+    try {
+      await request.patch(`/reconcile/portfolios/${pid}`, { cap })
+      setPortfolios((prev) => prev.map((p) => (p.id === pid ? { ...p, cap } : p)))
+      setReloadSignal((s) => s + 1)
+    } catch {
+      message.error('更新均衡强度失败')
     }
   }
 
@@ -153,6 +167,20 @@ export default function HoldingsPage() {
           ) : (
             <Tag color="gold">未关联</Tag>
           ))}
+
+          <Divider type="vertical" />
+
+          <span>均衡强度：</span>
+          <Segmented
+            value={current?.cap ?? 0.18}
+            onChange={(v) => linkCap(v as number)}
+            options={[
+              { label: '松', value: 0.22 },
+              { label: '中', value: 0.18 },
+              { label: '紧', value: 0.14 },
+            ]}
+            disabled={!current}
+          />
         </Space>
         <div style={{ marginTop: 8 }}>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -168,6 +196,11 @@ export default function HoldingsPage() {
             key: 'holdings',
             label: '实际持仓管理',
             children: <HoldingsManager portfolioId={pid} reloadSignal={reloadSignal} />,
+          },
+          {
+            key: 'penetration',
+            label: '底层穿透',
+            children: <HoldingsPenetration portfolioId={pid} reloadSignal={reloadSignal} />,
           },
           {
             key: 'reconcile',

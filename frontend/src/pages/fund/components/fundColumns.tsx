@@ -1,7 +1,8 @@
-import { Tooltip } from 'antd'
+import { Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import Sparkline from './Sparkline'
 import type { FundItem, HoldingItem } from '../types'
+import { CONC_META, KIND_META, LUCK_META, metaOf } from '../aiMeta'
 
 export function num(v: unknown): string {
   if (v === null || v === undefined) return '-'
@@ -53,11 +54,52 @@ interface ColumnOptions {
   onOpenTrend?: (code: string, name: string) => void
   // 是否展示净值走势迷你图（镜像快照无净值序列时可关闭）
   showNav?: boolean
+  // 是否展示 AI 定性分析列（评级/实力分/运气/集中/结论）
+  showAi?: boolean
+}
+
+/** 评级 0-3 → 金色星标；空显 -。 */
+function renderStars(rating: number | null | undefined) {
+  if (rating === null || rating === undefined) return <span className="text-gray-500">-</span>
+  const n = Math.max(0, Math.min(3, Number(rating)))
+  return <span style={{ color: '#fadb14', letterSpacing: 1 }}>{'★'.repeat(n) || '·'}</span>
+}
+
+function renderEnumTag(map: Record<string, { label: string; color: string }>, v: string | null | undefined) {
+  const m = metaOf(map, v)
+  return m ? <Tag color={m.color} style={{ marginInlineEnd: 0 }}>{m.label}</Tag> : <span className="text-gray-500">-</span>
+}
+
+/** AI 定性分析列：评级/实力分/运气/集中/结论；实力分与评级可后端排序。 */
+function aiColumns(sorter: (field: string) => true | undefined): ColumnsType<FundItem> {
+  return [
+    {
+      title: 'AI★', dataIndex: 'rating', width: 70, align: 'center',
+      sorter: sorter('rating'), render: (_: unknown, row) => renderStars(row.ai?.rating),
+    },
+    {
+      title: '实力分', dataIndex: 'skill_score', width: 80, align: 'right',
+      sorter: sorter('skill_score'),
+      render: (_: unknown, row) =>
+        row.ai?.skill_score != null ? row.ai.skill_score : <span className="text-gray-500">-</span>,
+    },
+    { title: '运气', key: 'ai_luck', width: 70, align: 'center', render: (_, row) => renderEnumTag(LUCK_META, row.ai?.luck_verdict) },
+    { title: '集中', key: 'ai_conc', width: 70, align: 'center', render: (_, row) => renderEnumTag(CONC_META, row.ai?.concentration) },
+    { title: '属性', key: 'ai_kind', width: 70, align: 'center', render: (_, row) => renderEnumTag(KIND_META, row.ai?.fund_kind) },
+    {
+      title: '结论', key: 'ai_verdict', width: 200, ellipsis: true,
+      render: (_, row) => {
+        const v = row.ai?.verdict
+        if (!v) return <span className="text-gray-500">-</span>
+        return <Tooltip title={v} placement="left"><span className="cursor-default">{v}</span></Tooltip>
+      },
+    },
+  ]
 }
 
 /** 基金详情结果列：基金筛选页与基金管理页共用，保证列与渲染一致。 */
 export function buildFundColumns(opts: ColumnOptions = {}): ColumnsType<FundItem> {
-  const { sortable, onOpenDetail, onOpenTrend, showNav = true } = opts
+  const { sortable, onOpenDetail, onOpenTrend, showNav = true, showAi = false } = opts
   const sorter = (field: string) => (sortable ? sortable(field) : undefined)
   const columns: ColumnsType<FundItem> = [
     { title: '代码', dataIndex: 'code', width: 90 },
@@ -95,6 +137,9 @@ export function buildFundColumns(opts: ColumnOptions = {}): ColumnsType<FundItem
       render: (holdings: HoldingItem[] | undefined) => renderHoldings(holdings, 'bond'),
     },
   ]
+  if (showAi) {
+    columns.push(...aiColumns(sorter))
+  }
   if (showNav) {
     columns.push({
       title: '净值走势',

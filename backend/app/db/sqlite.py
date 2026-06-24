@@ -32,6 +32,8 @@ SORTABLE_DETAIL = {
     "scale", "return_ytd", "drawdown_ytd", "sharpe_3y", "sharpe_1y",
     "max_drawdown_3y", "max_drawdown_1y", "position_stock",
 }
+# AI 定性分析可排序列（fund_ai_analysis，别名 a）
+SORTABLE_AI = {"skill_score", "rating", "tenure_years"}
 
 # 联合查询返回列（两后端结构必须一致）
 _RESULT_COLS = [
@@ -273,7 +275,12 @@ class SqliteDatabase(Database):
         segs = []
         for field, direction in order_parts:
             sql_dir = "DESC" if str(direction).lower() == "desc" else "ASC"
-            alias = "d" if field in SORTABLE_DETAIL else "f"
+            if field in SORTABLE_AI:
+                alias = "a"
+            elif field in SORTABLE_DETAIL:
+                alias = "d"
+            else:
+                alias = "f"
             segs.append(f'{alias}."{field}" {sql_dir}')
         return "ORDER BY " + ", ".join(segs)
 
@@ -286,7 +293,9 @@ class SqliteDatabase(Database):
                 where_parts.append(clause["where"])
                 where_params.extend(clause["where_params"])
         where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
-        base = 'FROM "funds" f LEFT JOIN "fund_details" d ON f."code" = d."fund_code"'
+        base = ('FROM "funds" f '
+                'LEFT JOIN "fund_details" d ON f."code" = d."fund_code" '
+                'LEFT JOIN "fund_ai_analysis" a ON f."code" = a."fund_code"')
         conn = self._conn()
         total = int(
             conn.execute(f"SELECT COUNT(*) AS n {base}{where_sql}", where_params).fetchone()["n"]

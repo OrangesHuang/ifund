@@ -19,11 +19,16 @@ ALLOWED_SORT_FIELDS = {
     "scale", "return_ytd", "drawdown_ytd", "sharpe_3y", "sharpe_1y",
     "max_drawdown_3y", "position_stock",
 }
+# AI 定性分析排序白名单（fund_ai_analysis 列，SQLite 层映射到别名 a）
+AI_SORT_FIELDS = {"skill_score", "rating", "tenure_years"}
+# AI 多选枚举筛选：query 参数名 → fund_ai_analysis 列（用 a. 前缀经 detail_params 通道下推）
+AI_ENUM_FILTERS = {"luck_verdict": "luck_verdict", "concentration": "concentration"}
 # 区间筛选字段（detail 列）
 RANGE_FIELDS = {
     "scale", "sharpe_3y", "sharpe_1y", "drawdown_3y", "drawdown_1y",
     "position_stock", "position_bond", "position_other",
     "return_ytd", "max_drawdown_3y", "max_drawdown_1y",
+    "return_1y", "return_3y", "return_5y",  # 长期收益区间：支持「条件→大池」按净值表现筛成长
 }
 # 比较条件允许的操作符 → DSL 前缀
 COMPARE_OPS = {"gt", "gte", "lt", "lte", "eq", "neq"}
@@ -58,6 +63,23 @@ def _parse_conditions(args, detail_params: list) -> None:
             detail_params.append((field, f"{op}.{value}"))
 
 
+def _parse_ai_params(args, detail_params: list) -> None:
+    """AI 定性分析筛选：枚举多选 / recommend / skill_score 下限。
+
+    全部以 ``a.`` 前缀的 key 走 detail_params 通道（SQLite 已 LEFT JOIN fund_ai_analysis a），
+    生成形如 ``"a"."luck_verdict" IN (?)`` 的子句；NULL（未分析基金）天然不命中，等价「仅看已分析」。
+    """
+    for param, col in AI_ENUM_FILTERS.items():
+        raw = args.get(param)
+        if raw and _csv(raw):
+            detail_params.append((f"a.{col}", f"in.({_csv(raw)})"))
+    if args.get("recommend") in ("1", "true", "True"):
+        detail_params.append(("a.recommend", "eq.1"))
+    smin = args.get("skill_score_min")
+    if smin not in (None, ""):
+        detail_params.append(("a.skill_score", f"gte.{smin}"))
+
+
 def parse_fund_filter_args(args):
     """把 query 参数解析成 (fund_params, detail_params)。"""
     fund_params: list = []
@@ -81,6 +103,7 @@ def parse_fund_filter_args(args):
                 fund_params.append(("name", f"not.ilike.*{kw.strip()}*"))
     _parse_range_params(args, detail_params)
     _parse_conditions(args, detail_params)
+    _parse_ai_params(args, detail_params)
     return fund_params, detail_params
 
 
@@ -91,7 +114,7 @@ def _parse_order_by(order_by):
     for seg in order_by.split(","):
         field, _, direction = seg.partition(":")
         field = field.strip()
-        if field in ALLOWED_SORT_FIELDS:
+        if field in ALLOWED_SORT_FIELDS or field in AI_SORT_FIELDS:
             parts.append((field, (direction or "asc").strip().lower()))
     return parts
 
@@ -106,6 +129,24 @@ def _attach_holdings(items: list) -> None:
 def _attach_nav(items: list) -> None:
     for item in items:
         item["nav_series"] = nav_crud.recent_series(item["code"])
+
+
+def _ai_public(row: dict | None) -> dict | None:
+    """剥离 fund_ai_analysis 的内部列（id/fund_code），返回前端可用的子对象。"""
+    if not row:
+        return None
+    return {k: v for k, v in row.items() if k not in ("id", "fund_code")}
+
+
+def _attach_ai(items: list) -> None:
+    """批量挂 AI 定性分析子对象：未分析基金 ai=None。"""
+    codes = [item["code"] for item in items]
+    if not codes:
+        return
+    rows = database.select("fund_ai_analysis", {"fund_code": f"in.({','.join(codes)})"})
+    by_code = {r["fund_code"]: r for r in rows}
+    for item in items:
+        item["ai"] = _ai_public(by_code.get(item["code"]))
 
 
 def _current_user_id() -> int:
@@ -133,6 +174,8 @@ def list_funds():
         _attach_holdings(items)
     if args.get("attach_nav") in ("1", "true", "True"):
         _attach_nav(items)
+    if args.get("attach_ai") in ("1", "true", "True"):
+        _attach_ai(items)
     return jsonify({"total": total, "items": items})
 
 
@@ -236,18 +279,35 @@ def delete_preset(preset_id):
 def get_snapshot(preset_id):
     """取该预设的镜像快照（每预设仅留最新一份；无则返回 snapshot=None）。"""
     user_id = _current_user_id()
-    if not _owned_preset(preset_id, user_id):
+    preset = _owned_preset(preset_id, user_id)
+    if not preset:
         return jsonify({"detail": "preset not found"}), 404
     row = database.select_one("fund_snapshots", {
         "user_id": f"eq.{user_id}", "preset_id": f"eq.{preset_id}",
     })
     if not row:
         return jsonify({"snapshot": None})
+    items = json.loads(row.get("items_json") or "[]")
+    _attach_ai(items)  # 镜像项补 AI 定性分析，供工作台就地展示/据此移入过滤名单
+    # 过滤名单 = 预设的 exclude_codes（与查询页排除复用同一份）；前端据此把镜像分两区
+    filters = json.loads(preset.get("filters_json") or "{}")
+    excluded_codes = [str(c) for c in (filters.get("exclude_codes") or [])]
+    # 被排除的基金已从快照剔除（快照由已过滤的 latest 存入），故按 code 直接拉详情，
+    # 保证「过滤名单」能完整展示全部被排除项，而非仅恰好仍在快照里的少数。
+    excluded_items: list = []
+    if excluded_codes:
+        _, excluded_items = database.list_funds_with_details(
+            [("code", f"in.({','.join(excluded_codes)})")], [], 0, len(excluded_codes), None,
+        )
+        _attach_holdings(excluded_items)
+        _attach_ai(excluded_items)
     return jsonify({"snapshot": {
         "id": row["id"],
         "created_at": row.get("created_at"),
         "fund_count": row.get("fund_count", 0),
-        "items": json.loads(row.get("items_json") or "[]"),
+        "items": items,
+        "excluded_codes": excluded_codes,
+        "excluded_items": excluded_items,
     }})
 
 
@@ -293,4 +353,26 @@ def get_one(code):
     detail = database.select_one("fund_details", {"fund_code": f"eq.{code}"}) or {}
     merged = {**detail, **fund}  # funds 的 code/name 优先，其余取详情列
     merged["holdings"] = holdings_crud.top_holdings(code)
+    merged["ai"] = _ai_public(database.select_one("fund_ai_analysis", {"fund_code": f"eq.{code}"}))
     return jsonify(merged)
+
+
+@bp.get("/<code>/holdings")
+def get_holdings(code):
+    """某基金按季度的持仓明细 + 全部可用季度（供详情页切换历史报告期分析）。
+
+    query: ``quarter``(缺省=最新)、``holding_type``(默认 stock)、``limit``(默认 50)。
+    返回 ``{quarters, quarter, holdings}``：quarter 为实际返回的季度。
+    """
+    holding_type = request.args.get("holding_type", "stock")
+    quarter = request.args.get("quarter")
+    try:
+        limit = int(request.args.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 200))
+    quarters = holdings_crud.available_quarters(code, holding_type)
+    q = quarter if quarter in quarters else (quarters[0] if quarters else None)
+    holdings = (holdings_crud.top_holdings(code, holding_type, limit=limit, quarter=q)
+                if q else [])
+    return jsonify({"quarters": quarters, "quarter": q, "holdings": holdings})

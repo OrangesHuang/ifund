@@ -1,6 +1,7 @@
 """Flask 应用工厂：注册蓝图、JWT、SQLite 建表、SPA fallback。"""
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 from pathlib import Path
@@ -28,6 +29,15 @@ def create_app() -> Flask:
     app.config["JWT_SECRET_KEY"] = secret_key
     app.config["JWT_TOKEN_LOCATION"] = ["headers"]
     app.config["JWT_HEADER_TYPE"] = "Bearer"
+    # access token 有效期：默认 30 天（本地个人工具，免于频繁重登）。
+    # 可用环境变量 JWT_EXPIRES_DAYS 调整；设为 0 则永不过期。
+    try:
+        expires_days = float(os.getenv("JWT_EXPIRES_DAYS", "30"))
+    except ValueError:
+        expires_days = 30
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = (
+        False if expires_days <= 0 else datetime.timedelta(days=expires_days)
+    )
     JWTManager(app)
 
     # SQLite 后端：启动时自动建表（幂等）
@@ -35,6 +45,11 @@ def create_app() -> Flask:
     if os.getenv("DB_BACKEND", "sqlite").lower() == "sqlite":
         schema_sql = (backend_dir / "schema_sqlite.sql").read_text(encoding="utf-8")
         database.init_db(schema_sql)
+        # 增量迁移：portfolios 表加 cap 列（已存在则跳过）
+        try:
+            database.init_db("ALTER TABLE portfolios ADD COLUMN cap REAL DEFAULT 0.18;")
+        except Exception:
+            pass
 
     # 注册蓝图
     from app.routers.auth import bp as auth_bp

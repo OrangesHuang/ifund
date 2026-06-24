@@ -45,9 +45,27 @@ def latest_quarter(code: str, holding_type: str = "stock") -> str | None:
     return row["quarter"] if row else None
 
 
-def top_holdings(code: str, holding_type: str = "stock", limit: int = 10) -> list[dict]:
-    """最新季度的前 N 大持仓（按持仓比例降序），跨季度数据不会混入。"""
-    quarter = latest_quarter(code, holding_type)
+def available_quarters(code: str, holding_type: str = "stock") -> list[str]:
+    """该基金某类持仓的全部可用季度（降序，最新在前），供详情页切换历史报告期。"""
+    rows = database.select("fund_holdings", [
+        ("fund_code", f"eq.{code}"),
+        ("holding_type", f"eq.{holding_type}"),
+        ("order", "quarter.desc"),
+    ])
+    seen: set[str] = set()
+    out: list[str] = []
+    for r in rows:
+        q = r.get("quarter")
+        if q and q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out
+
+
+def top_holdings(code: str, holding_type: str = "stock", limit: int = 10,
+                 quarter: str | None = None) -> list[dict]:
+    """指定季度（默认最新）的前 N 大持仓（按持仓比例降序），跨季度数据不会混入。"""
+    quarter = quarter or latest_quarter(code, holding_type)
     if not quarter:
         return []
     return database.select("fund_holdings", [

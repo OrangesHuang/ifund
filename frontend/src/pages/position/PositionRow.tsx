@@ -1,9 +1,51 @@
 import { Tag, Tooltip } from 'antd'
 import MiniNavChart from './MiniNavChart'
 import ProsperityBars from './ProsperityBars'
+import { CONC_META, KIND_META, LUCK_META, metaOf } from '../fund/aiMeta'
+import type { FundAi } from '../fund/aiMeta'
 import type { PositionItem } from './types'
 
 const TAG_COLOR: Record<string, string> = { 加码: 'red', 标配: 'blue', 减码: 'default' }
+
+// 代表基金的 AI 定性分析一行：评级★ + 实力分 + 运气/集中标签 + 结论（hover 全文）。
+// 未分析时给淡灰提示，避免误以为「无评价=好」。
+function AiLine({ ai }: { ai?: FundAi | null }) {
+  if (!ai || (ai.rating == null && ai.skill_score == null && !ai.luck_verdict && !ai.verdict)) {
+    return <span style={{ fontSize: 12, color: '#bfbfbf' }}>AI 未分析</span>
+  }
+  const luck = metaOf(LUCK_META, ai.luck_verdict)
+  const conc = metaOf(CONC_META, ai.concentration)
+  const kind = metaOf(KIND_META, ai.fund_kind)
+  const stars = ai.rating != null ? Math.max(0, Math.min(3, Number(ai.rating))) : null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 4 }}>
+      {stars != null && (
+        <span style={{ color: '#fadb14', letterSpacing: 1, fontSize: 13 }}>{'★'.repeat(stars) || '·'}</span>
+      )}
+      {ai.skill_score != null && (
+        <span style={{ fontSize: 12, color: '#8c8c8c' }}>
+          实力分 <b style={{ color: 'inherit' }}>{ai.skill_score}</b>
+        </span>
+      )}
+      {luck && <Tag color={luck.color} style={{ marginInlineEnd: 0 }}>{luck.label}</Tag>}
+      {conc && <Tag color={conc.color} style={{ marginInlineEnd: 0 }}>{conc.label}</Tag>}
+      {kind && <Tag color={kind.color} style={{ marginInlineEnd: 0 }}>{kind.label}</Tag>}
+      {ai.recommend === 0 && <Tag color="red" style={{ marginInlineEnd: 0 }}>不建议</Tag>}
+      {ai.verdict && (
+        <Tooltip title={ai.verdict} placement="top">
+          <span
+            style={{
+              fontSize: 12, color: '#8c8c8c', maxWidth: 360,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default',
+            }}
+          >
+            {ai.verdict}
+          </span>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
 
 // 形如 "1.78" / "-25.3%"；空值显示 -
 function fmt(v: number | null | undefined, suffix = ''): string {
@@ -100,6 +142,7 @@ export default function PositionRow({
             </Tooltip>
           )}
         </div>
+        <AiLine ai={fund.ai} />
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, marginTop: 6, alignItems: 'flex-start' }}>
           {/* 左块：指标 + 迷你走势图 */}

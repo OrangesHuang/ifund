@@ -21,7 +21,7 @@ from app.stock_industry.crud import industry_crud
 bp = Blueprint("reconcile", __name__, url_prefix="/api/reconcile")
 
 CAP_MIN, CAP_MAX = 0.10, 0.30
-BAND_MIN, BAND_MAX = 0.005, 0.10
+BAND_MIN, BAND_MAX = 0.0, 0.10
 
 
 def _clamp(val, lo, hi, default):
@@ -73,13 +73,19 @@ def create_portfolio():
 @bp.patch("/portfolios/<int:pid>")
 @jwt_required()
 def update_portfolio(pid: int):
-    """改名 / 关联预设。body: ``{name?, preset_id?}``（含 preset_id 键即更新，可置空取消关联）。"""
+    """改名 / 关联预设 / 均衡强度。body: ``{name?, preset_id?, cap?}``（含 preset_id 键即更新，可置空取消关联）。"""
     uid = preset_access.current_user_id()
     body = request.get_json(silent=True) or {}
     set_preset = "preset_id" in body
+    cap = body.get("cap")
+    try:
+        cap = float(cap) if cap is not None else None
+    except (TypeError, ValueError):
+        cap = None
     pf = portfolios_store.update_portfolio(
         pid, uid, name=body.get("name"),
         preset_id=body.get("preset_id"), set_preset=set_preset,
+        cap=cap,
     )
     if not pf:
         return jsonify({"detail": "portfolio not found"}), 404
@@ -142,24 +148,33 @@ def get_holdings_clusters():
     items = preset_access.snapshot_items(preset_id, uid)
     if items is None:
         return jsonify({"has_preset": True, "map": {}, "clusters": {}})
-    result, clusters = compute_position(items, optimize.DEFAULT_CAP)
-    if result is None or not result.get("items"):
+    pf_cap = pf.get("cap")
+    pf_cap = float(pf_cap) if pf_cap is not None else optimize.DEFAULT_CAP
+    result, clusters = compute_position(items, pf_cap)
+    if result is None or not clusters:
         return jsonify({"has_preset": True, "map": {}, "clusters": {}})
     code2cluster = classify.build_code_to_cluster(clusters)
     name2cluster = classify.build_name_index(clusters)
     cluster_vecs = classify.cluster_vectors(clusters)
-    cid2cluster = {c["cluster_id"]: c for c in clusters}
-    # 簇序号：按目标 items 顺序（权重降序）从 1 开始编号
+    # 以聚类簇为主体：输出全部原始簇（非仅优化选中的），避免 cap 过滤掉的簇的持仓被判赛道外
+    opt_by_cid = {}
+    for seq, it in enumerate(result.get("items") or [], start=1):
+        opt_by_cid[it["cluster_id"]] = (seq, it)
     clusters_out: dict[str, dict] = {}
-    for seq, it in enumerate(result["items"], start=1):
-        cid = it["cluster_id"]
-        c = cid2cluster.get(cid, {})
+    for c in clusters:
+        cid = c["cluster_id"]
         industries = [{"label": i["label"], "ratio": i["ratio"]}
                       for i in (c.get("top_industries") or [])[:3]]
+        opt = opt_by_cid.get(cid)
+        target_fund = None
+        if opt:
+            fund = opt[1].get("fund") or {}
+            target_fund = {"code": fund.get("code", ""), "name": fund.get("name", "")}
         clusters_out[str(cid)] = {
-            "seq": seq,
-            "label": it.get("cluster_name", ""),
+            "seq": opt[0] if opt else None,
+            "label": c.get("name", ""),
             "industries": industries,
+            "target_fund": target_fund,
         }
     ind_idx = industry_crud.industry_index()
     out: dict[str, int | None] = {}
@@ -169,6 +184,26 @@ def get_holdings_clusters():
             code2cluster, name2cluster, cluster_vecs, ind_idx)
         out[h["fund_code"]] = cid if (cid is not None and str(cid) in clusters_out) else None
     return jsonify({"has_preset": True, "map": out, "clusters": clusters_out})
+
+
+@bp.get("/holdings/penetration")
+@jwt_required()
+def get_holdings_penetration():
+    """实际持仓底层穿透（按市值权重穿透到申万三级行业/个股）。query: ``?portfolio_id=``。
+
+    返回 ``{portfolio_id, total_market_value, visible_position_pct, industries, stocks}``；
+    无有效持仓时各列表为空。与 CLI ``holdings penetration`` 共用 holdings_compute.penetrate_holdings。
+    """
+    uid = preset_access.current_user_id()
+    pf, error = _resolve_portfolio(uid)
+    if error:
+        payload, status = error
+        return jsonify(payload), status
+    data = holdings_compute.penetrate_holdings(pf["id"])
+    if data is None:
+        return jsonify({"portfolio_id": pf["id"], "total_market_value": 0,
+                        "visible_position_pct": 0, "industries": [], "stocks": []})
+    return jsonify(data)
 
 
 @bp.post("/holdings")
@@ -428,7 +463,8 @@ def run():
     if not holdings:
         return jsonify({"rows": None, "reason": "该实盘尚未录入任何持仓，请先在上方录入"})
 
-    cap = _clamp(body.get("cap"), CAP_MIN, CAP_MAX, optimize.DEFAULT_CAP)
+    cap_default = float(pf.get("cap") or optimize.DEFAULT_CAP)
+    cap = _clamp(body.get("cap"), CAP_MIN, CAP_MAX, cap_default)
     band = _clamp(body.get("band"), BAND_MIN, BAND_MAX, recon_algo.DEFAULT_BAND)
     sell_outside = bool(body.get("sell_outside"))
     trim_overflow = body.get("trim_overflow")

@@ -19,10 +19,16 @@ node_modules/
 frontend/dist/
 backend/static/
 
-# Editor / OS
+# Editor / OS / 本地工具
 .DS_Store
 .idea/
 .vscode/
+.claude/
+.qoder/
+
+# 备份与误生成
+*.bak
+/package-lock.json
 
 # Build
 build/

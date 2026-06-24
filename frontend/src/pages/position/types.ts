@@ -1,4 +1,5 @@
 // 仓位建议页的数据结构（对应后端 /api/position/run 返回）
+import type { FundAi } from '../fund/aiMeta'
 
 export interface ProsperityBreakdown {
   total: number
@@ -27,6 +28,7 @@ export interface PositionFund {
   position_stock: number | null
   scale: number | null
   cluster_rank: number  // 簇内综合分排名（1=TOP1）；>1 表示为降相关性选了次优基金
+  ai?: FundAi | null    // AI 定性分析（未分析为 null）
 }
 
 export interface NavCurvePoint {

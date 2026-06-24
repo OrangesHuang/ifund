@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS portfolios (
     user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     preset_id INTEGER,                      -- 关联的仓位建议（query_presets.id）；NULL=未关联
+    cap REAL DEFAULT 0.18,                  -- 均衡强度上限（松0.22/中0.18/紧0.14），持久化在实盘上
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_portfolios_user ON portfolios (user_id);
@@ -235,3 +236,35 @@ CREATE TABLE IF NOT EXISTS holding_txns (
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_holding_txns_pf ON holding_txns (portfolio_id, fund_code, trade_date);
+
+-- 基金 AI 定性分析（与客观 fund_details 分离：AI 生成、可重跑、带出处）。
+-- 由 CLI `preset ai-set` 写入（OpenClaw 等外部 agent 填充），`preset funds --ai` 附列展示。
+-- 核心回答三问：是否靠运气(skill/luck)、是否单押赛道(concentration)、是否硬实力逻辑(hard_thesis)。
+CREATE TABLE IF NOT EXISTS fund_ai_analysis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fund_code TEXT NOT NULL UNIQUE,
+    manager TEXT,                           -- 主理经理（冗余便于查；共管时主力）
+    verdict TEXT,                           -- 一句话结论
+    rating INTEGER,                         -- 综合星级 0-3（对应人工 ★）
+    recommend INTEGER DEFAULT 0,            -- 是否推荐 0/1（对应人工 *）
+    skill_score INTEGER,                    -- 硬实力分 0-100（越高越靠实力非运气）
+    luck_verdict TEXT,                      -- solid | mixed | luck
+    skill_reason TEXT,                      -- 运气vs实力的判断理由
+    concentration TEXT,                     -- single_bet | focused | diversified
+    concentration_reason TEXT,              -- 赛道集中度判断理由
+    fund_kind TEXT,                         -- subjective(主观选股) | rotation(景气轮动) | sector(赛道押注)
+    hard_thesis TEXT,                       -- 硬实力逻辑说明（背景/风格/可归因alpha）
+    tenure_years REAL,                      -- 现任任职年限
+    is_original INTEGER,                    -- 是否原装(从成立就管) 0/1
+    is_comanaged INTEGER,                   -- 是否共管 0/1
+    scale_risk TEXT,                        -- tiny(清盘风险) | small | ok | large(大而平庸)
+    style_stability TEXT,                   -- stable | volatile | unproven(样本不足)
+    turnover_note TEXT,                     -- 换手/交易风格备注（无客观字段，靠AI判断）
+    tags TEXT DEFAULT '[]',                 -- 标签 JSON 数组（原装/接手/名将/新手/靠风口/团队在动…）
+    confidence TEXT,                        -- high | medium | low（样本不足→low）
+    model TEXT,                             -- 产出该分析的模型/agent 标识
+    data_basis TEXT,                        -- 依据：净值截止/持仓季度/规模日期等
+    analyzed_at TEXT,                       -- 分析时间（外部传入或写入时戳）
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_fund_ai_analysis_code ON fund_ai_analysis (fund_code);

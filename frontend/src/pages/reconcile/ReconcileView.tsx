@@ -16,8 +16,6 @@ export default function ReconcileView({
   const [result, setResult] = useState<ReconResult | null>(null)
   // 缓冲带：偏离在盘子的此比例内则保持不动（抗短期噪音、保调仓连贯）。默认灵敏 1.5%。
   const [band, setBand] = useState(0.015)
-  // 均衡强度 cap：与仓位建议一致，默认「松」0.22。
-  const [cap, setCap] = useState(0.22)
   // 开关一：赛道外是否可卖去补缺口（false=保留不动）。默认可卖补仓。
   const [sellOutside, setSellOutside] = useState(true)
   // 开关二：赛道内超配是否可减（true=削峰填谷 / false=不减只往上加）。默认可减（最省）。
@@ -43,7 +41,6 @@ export default function ReconcileView({
       const { data } = await request.post<ReconResult>('/reconcile/run', {
         portfolio_id: portfolioId,
         band,
-        cap,
         sell_outside: sellOutside,
         trim_overflow: trimOverflow,
       })
@@ -53,7 +50,7 @@ export default function ReconcileView({
     } finally {
       setLoading(false)
     }
-  }, [portfolioId, hasPreset, band, cap, sellOutside, trimOverflow])
+  }, [portfolioId, hasPreset, band, sellOutside, trimOverflow])
 
   const rows = result?.rows
   const summary = result?.summary
@@ -102,21 +99,7 @@ export default function ReconcileView({
                   { label: '宽松 5%', value: 0.05 },
                   { label: '标准 3%', value: 0.03 },
                   { label: '灵敏 1.5%', value: 0.015 },
-                ]}
-              />
-            </span>
-          </Tooltip>
-          <Tooltip title="均衡强度（单一行业穿透占比上限），与仓位建议一致。紧=更分散。改这里会用新 cap 重算目标比例。">
-            <span>
-              均衡强度：
-              <Segmented
-                style={{ marginLeft: 8 }}
-                value={cap}
-                onChange={(v) => setCap(v as number)}
-                options={[
-                  { label: '松', value: 0.22 },
-                  { label: '中', value: 0.18 },
-                  { label: '紧', value: 0.14 },
+                  { label: '全替换 0%', value: 0 },
                 ]}
               />
             </span>

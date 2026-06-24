@@ -77,6 +77,22 @@ export default function SummaryCard({ summary }: { summary: ReconSummary }) {
           <Statistic title="当前持仓合计" value={yuan(summary.held_total)} suffix="元" />
         </Col>
 
+        {summary.replace_total > 0 && (
+          <Col xs={24} md={18}>
+            <Tooltip title="把簇内「非目标基金」换成本簇目标基金的等额换手总额——即便它收益更高也按目标标的归一；不改变赛道仓位，仅为精确还原目标标的">
+              <Statistic
+                title="标的替换（等额换仓，不改仓位）"
+                valueRender={() => (
+                  <span style={{ fontSize: 16 }}>
+                    共 <b style={{ color: '#13c2c2' }}>{yuan(summary.replace_total)}</b> 元 ·
+                    簇内非目标基金 → 目标基金
+                  </span>
+                )}
+              />
+            </Tooltip>
+          </Col>
+        )}
+
         {summary.has_cost && (
           <>
             <Col xs={12} sm={8} md={6}>
