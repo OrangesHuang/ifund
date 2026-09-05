@@ -6,6 +6,9 @@ const request = axios.create({
   timeout: 30000,
 })
 
+// 登录页完整路径(子路径部署下是 /ifund/login, 不是 /login, 否则会跳到别的应用)
+const loginPath = `${import.meta.env.BASE_URL}login`
+
 request.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) {
@@ -19,8 +22,8 @@ request.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
+      if (window.location.pathname !== loginPath) {
+        window.location.href = loginPath
       }
     }
     return Promise.reject(error)
