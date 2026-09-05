@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import re
 import requests
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
@@ -23,8 +24,11 @@ def get_running(task_type: str):
 def resolve_targets(args, json_body=None):
     """解析筛选条件 → (codes, fund_types)。
 
-    codes 显式给出则优先（支持 JSON body 数组、query string 逗号分隔、keyword 参数）；
-    否则按筛选条件查 list_funds_with_details 得 codes 子集；
+    codes 显式给出则优先（支持 JSON body 数组、query string 逗号分隔的 6 位代码）；
+    keyword 仅在形如基金代码（6 位数字）时当作单码快速拉取——否则它是"名称/代码
+    搜索词"（如 "C"），必须走下方筛选条件路径，绝不能把搜索词本身当代码传给 worker，
+    否则会去拉代码为 "C" 的基金而必失败；
+    按筛选条件查 list_funds_with_details 得 codes 子集；
     都没有则返回 ([], []) 表示全量。
     """
     # 1) JSON body 里的 codes（前端 POST 时传的）
@@ -35,12 +39,21 @@ def resolve_targets(args, json_body=None):
                 return [c.strip() for c in codes_raw if c.strip()], []
             return [c.strip() for c in str(codes_raw).split(",") if c.strip()], []
 
-    # 2) URL query string 里的 codes 或 keyword
-    codes_raw = args.get("codes") or args.get("keyword")
+    # 2) URL query string 里的 codes（显式代码列表）
+    codes_raw = args.get("codes")
     if codes_raw:
-        return [c.strip() for c in codes_raw.split(",") if c.strip()], []
+        segs = [c.strip() for c in codes_raw.split(",") if c.strip()]
+        if segs and all(re.fullmatch(r"\d{6}", s) for s in segs):
+            return segs, []
 
-    # 3) 筛选条件（需要 request.args 对象以支持 getlist）
+    # 3) keyword：仅在纯 6 位数字（含逗号分隔）时视为代码；其余视为搜索词走筛选路径
+    kw = (args.get("keyword") or "").strip()
+    if kw:
+        kw_segs = [k.strip() for k in kw.split(",") if k.strip()]
+        if kw_segs and all(re.fullmatch(r"\d{6}", k) for k in kw_segs):
+            return kw_segs, []
+
+    # 4) 筛选条件（需要 request.args 对象以支持 getlist）
     # pylint: disable=import-outside-toplevel
     from app.fund.api.router import parse_fund_filter_args
     fund_params, detail_params = parse_fund_filter_args(args)
