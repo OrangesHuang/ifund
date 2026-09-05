@@ -1,8 +1,8 @@
 import axios from 'axios'
 
-// 统一 axios 实例：baseURL=/api，注入 JWT，401 跳登录
+// 统一 axios 实例：baseURL=部署路径+/api(开发 /api 不变, 生产 /ifund/api)，注入 JWT，401 跳登录
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: `${import.meta.env.BASE_URL}api`,
   timeout: 30000,
 })
 

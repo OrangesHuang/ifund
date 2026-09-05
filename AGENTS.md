@@ -21,7 +21,6 @@ Pylint max line length is **120** chars. `pyproject.toml` has relaxed design lim
 ## Code Style
 
 - **All backend Python files** must start with `from __future__ import annotations`.
-- **Exception**: `mcp_server/server.py` — deliberately omits it because FastMCP reads type annotations as runtime objects; stringified annotations break tool registration.
 - No ORM at runtime. `flask-sqlalchemy` is installed but only used for model declarations as documentation. All data access uses raw SQL via the abstraction layer in `backend/app/db/` (`Database` ABC in `base.py`, SQLite impl in `sqlite.py`).
 - All `akshare` calls MUST run in a **subprocess worker** (`backend/app/common/worker_base.py`). Calling akshare inside a Flask request thread crashes the server (socket fd conflict).
 
@@ -31,7 +30,6 @@ Pylint max line length is **120** chars. `pyproject.toml` has relaxed design lim
 - **SQLite only** for now. MySQL is planned but unimplemented. The DB abstraction layer (`backend/app/db/base.py`) is the contract — new backends implement the `Database` ABC without touching business code.
 - **Frontend dev :9000 proxies `/api` → backend :8000**. Production build outputs to `backend/static`; backend serves the SPA on :8000 directly (no separate frontend server needed in prod).
 - **`./service.sh` (launchd+waitress) and `./start.sh` share port :8000** — they cannot run simultaneously. Stop the service before debugging: `./service.sh stop` → `./start.sh` → Ctrl-C → `./service.sh start`.
-- **MCP server** (`mcp_server/server.py`) shares `backend/venv`. Slimmed (2026-06) to a **single `ifund(args)` passthrough tool** that execs `backend/ifund_cli.py` — no HTTP/PAT/JWT. It's only a thin bridge for MCP-only agents (e.g. OpenClaw); shell-capable agents should call the CLI directly (see below). Old 33-tool impl in `server.py.33tools.bak`.
 
 ## Data CLI (查询/分析 iFund 数据的首选)
 

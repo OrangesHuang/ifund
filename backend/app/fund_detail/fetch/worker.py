@@ -36,7 +36,9 @@ def _process_one(code):
     hold = _try(ak.fund_individual_detail_hold_xq, code)
     analysis = _try(ak.fund_individual_analysis_xq, code)
     achievement = _try(ak.fund_individual_achievement_xq, code)
-    if basic is None and analysis is None and achievement is None:
+    # 核心档案（名称/规模/经理/类型等）必须由 basic 提供；缺失则放弃本次写入，
+    # 避免用空值覆盖库里已有的好数据（"拉取后详情消失"的根因）。
+    if basic is None or getattr(basic, "empty", True):
         return "fail"
     columns = mapper.map_all(basic, hold, analysis, achievement, latest)
     # 今年以来收益改用本地净值自算（数据源快照常滞后，与最新净值对不上）

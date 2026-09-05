@@ -16,11 +16,9 @@ sleep 1
 
 # 1. 后端 venv + 依赖
 if ! "$BACKEND/venv/bin/pip" --version >/dev/null 2>&1; then
-  echo "[start] (重新)创建 venv (Python 3.12) ..."
+  echo "[start] (重新)创建 venv ..."
   rm -rf "$BACKEND/venv"
-  # 需 Python 3.12+（官方 MCP SDK 要求 3.10+）；优先 python3.12，回退到 python3
-  PYBIN="$(command -v python3.12 || command -v python3)"
-  "$PYBIN" -m venv "$BACKEND/venv"
+  python3 -m venv "$BACKEND/venv"
 fi
 echo "[start] 安装后端依赖 ..."
 echo "[start] 升级 pip ..."

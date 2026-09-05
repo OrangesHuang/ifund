@@ -1,12 +1,9 @@
-"""AI 定性分析服务：调用 Qoder Agent SDK 对单只基金做历史穿透分析（支持流式）。"""
+"""AI 定性分析服务：流式分析已停用（qoder-agent-sdk 要求 Python >=3.10，已随降级移除）；
+保留 fund_ai_analysis 表与提示词管理，OpenClaw 仍可通过 CLI `ai-set` 写入分析数据。"""
 from __future__ import annotations
 
 import asyncio
-import datetime
-import json
 import logging
-import os
-import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -57,134 +54,11 @@ def reset_prompt(key: str) -> None:
     database.delete("app_settings", {"key": f"eq.{key}"})
 
 
-def _extract_json(text: str) -> dict:
-    """从 AI 回复文本中提取 JSON 对象（兼容 markdown 代码块包裹）。"""
-    text = text.strip()
-    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if m:
-        text = m.group(1).strip()
-    m2 = re.search(r"\{.*\}", text, re.DOTALL)
-    if m2:
-        return json.loads(m2.group(0))
-    return json.loads(text)
-
-
-_AI_ENUMS = {
-    "luck_verdict": {"solid", "mixed", "luck"},
-    "concentration": {"single_bet", "focused", "diversified"},
-    "fund_kind": {"subjective", "rotation", "sector"},
-    "scale_risk": {"tiny", "small", "ok", "large"},
-    "style_stability": {"stable", "volatile", "unproven"},
-    "confidence": {"high", "medium", "low"},
-}
-_AI_INT_RANGE = {
-    "rating": (0, 3), "recommend": (0, 1), "skill_score": (0, 100),
-    "is_original": (0, 1), "is_comanaged": (0, 1),
-}
-_AI_TEXT = {"manager", "verdict", "skill_reason", "concentration_reason", "hard_thesis",
-            "turnover_note", "model", "data_basis", "analyzed_at"}
-_AI_FLOAT = {"tenure_years"}
-
-
-def _coerce_field(key: str, val):
-    if key in _AI_ENUMS:
-        if val not in _AI_ENUMS[key]:
-            raise ValueError(f"{key} 取值须为 {sorted(_AI_ENUMS[key])}，收到 {val!r}")
-        return val
-    if key in _AI_INT_RANGE:
-        lo, hi = _AI_INT_RANGE[key]
-        iv = int(bool(val)) if isinstance(val, bool) else int(val)
-        if not lo <= iv <= hi:
-            raise ValueError(f"{key} 须在 [{lo},{hi}]，收到 {iv}")
-        return iv
-    if key in _AI_FLOAT:
-        return float(val)
-    if key == "tags":
-        if isinstance(val, str):
-            val = [val]
-        if not isinstance(val, list):
-            raise ValueError("tags 须为字符串数组")
-        return json.dumps([str(t) for t in val], ensure_ascii=False)
-    if key in _AI_TEXT:
-        return None if val is None else str(val)
-    raise ValueError(f"未知字段 {key!r}")
-
-
-def _save_result(code: str, payload: dict) -> dict:
-    now = datetime.datetime.now().isoformat(timespec="seconds")
-    fields = {}
-    for k, v in payload.items():
-        if k in ("model", "data_basis"):
-            fields[k] = _coerce_field(k, v)
-        elif k in _AI_ENUMS or k in _AI_INT_RANGE or k in _AI_FLOAT or k in _AI_TEXT or k == "tags":
-            fields[k] = _coerce_field(k, v)
-    fields["updated_at"] = now
-    fields.setdefault("analyzed_at", now)
-
-    exists = database.select_one("fund_ai_analysis", {"fund_code": f"eq.{code}"})
-    if exists:
-        database.update("fund_ai_analysis", {"fund_code": code}, fields)
-    else:
-        database.insert("fund_ai_analysis", {"fund_code": code, **fields})
-    return database.select_one("fund_ai_analysis", {"fund_code": f"eq.{code}"})
-
-
-async def _stream_sdk(bundle: dict, system_prompt: str, user_template: str) -> AsyncIterator[str]:
-    # pylint: disable=import-outside-toplevel
-    from qoder_agent_sdk import (
-        AssistantMessage,
-        QoderAgentOptions,
-        ResultMessage,
-        TextBlock,
-        access_token_from_env,
-        query,
-    )
-
-    # cli_path 从环境变量取（默认走 PATH 里的 qoder），避免写死某台机器的绝对路径。
-    opts = QoderAgentOptions(
-        auth=access_token_from_env(),
-        system_prompt=system_prompt,
-        permission_mode="bypassPermissions",
-        max_turns=1,
-        cli_path=os.getenv("QODER_CLI_PATH", "qoder"),
-    )
-    bundle_json = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
-    user_prompt = user_template.replace("__BUNDLE_JSON__", bundle_json)
-
-    async for msg in query(prompt=user_prompt, options=opts):
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
-                if isinstance(block, TextBlock):
-                    yield block.text
-        elif isinstance(msg, ResultMessage):
-            if msg.is_error:
-                errors = msg.errors or ["unknown error"]
-                raise RuntimeError(f"SDK error: {'; '.join(errors)}")
-
-
 async def analyze_fund_streaming(code: str) -> AsyncIterator[dict]:
-    """流式分析：yield {"type": "chunk", "text": ...} 和最终 {"type": "done", "ai": {...}}。"""
-    # pylint: disable=import-outside-toplevel
-    from cli.bundle import build_bundle
-
-    bundle = build_bundle(code)
-    if not bundle:
-        raise ValueError(f"基金 {code} 不存在或无数据")
-
-    system_prompt = get_prompt("ai_analyze_system", DEFAULT_SYSTEM_PROMPT)
-    user_template = get_prompt("ai_analyze_user", DEFAULT_USER_PROMPT_TEMPLATE)
-
-    logger.info("AI analyze streaming: starting for %s", code)
-    full_text = ""
-    async for chunk in _stream_sdk(bundle, system_prompt, user_template):
-        full_text += chunk
-        yield {"type": "chunk", "text": chunk}
-
-    logger.info("AI analyze streaming: done for %s (%d chars)", code, len(full_text))
-    payload = _extract_json(full_text)
-    row = _save_result(code, payload)
-    ai_public = {k: v for k, v in row.items() if k not in ("id", "fund_code")}
-    yield {"type": "done", "ai": ai_public}
+    """流式分析：qoder-agent-sdk 已随 Python 3.9 降级移除，直接报错。"""
+    raise RuntimeError(
+        "AI 分析功能已停用：qoder-agent-sdk 要求 Python >=3.10，已随 Python 3.9 降级一并移除"
+    )
 
 
 def analyze_fund(code: str) -> dict:

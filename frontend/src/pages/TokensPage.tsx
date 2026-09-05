@@ -124,7 +124,7 @@ export default function TokensPage() {
         type="info"
         showIcon
         className="mb-3"
-        message="供 OpenClaw 等本机 agent 通过 MCP 长期调用。令牌绑定当前账号，明文仅在创建时显示一次。"
+        message="供 OpenClaw 等本机 agent 通过 API 长期调用。令牌绑定当前账号，明文仅在创建时显示一次。"
       />
       <Table
         rowKey="id"

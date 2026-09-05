@@ -166,7 +166,12 @@ _DRAWDOWN_COLS = {
 
 
 def map_all(basic, hold, analysis, achievement, trade_date: str | None) -> dict:
-    """汇总四接口结果为 fund_details 列字典。"""
+    """汇总四接口结果为 fund_details 列字典。
+
+    仅保留本次 fetch 实际取到的值：取不到（None）的字段一律不写入列字典，这样
+    ``upsert`` 对已存在的行只会更新本次取到的列，不会用空值覆盖库里的好数据
+    （避免「拉取后详情消失」）。``fetch_time`` / ``trade_date`` 始终写入。
+    """
     columns: dict = {
         "fetch_time": datetime.datetime.now().isoformat(),
         "trade_date": trade_date,
@@ -175,4 +180,5 @@ def map_all(basic, hold, analysis, achievement, trade_date: str | None) -> dict:
     _map_hold(hold, columns)
     _map_analysis(analysis, columns)
     _map_achievement(achievement, columns)
-    return columns
+    return {k: v for k, v in columns.items()
+            if v is not None or k in ("fetch_time", "trade_date")}
