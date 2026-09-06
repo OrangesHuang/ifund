@@ -63,12 +63,7 @@ for r in rows:
         n_skip += 1; continue
     vals = dict(r)
     if old:
-        vals["manual"] = old[1]
-        vals["em_industry"] = old[2] or vals.get("em_industry", "")
-        vals.pop("id", None)
-        sets = {k: vals[k] for k in ("stock_name","market","sw_l1","sw_l2","sw_l3","em_industry","source","manual") if k in vals}
-        sets["updated_at"] = "datetime('now')" if False else "2026-09-06 00:00:00"
-        c.execute("UPDATE stock_industry SET stock_name=?,market=?,sw_l1=?,sw_l2=?,sw_l3=?,em_industry=?,source=?,manual=?,updated_at=datetime('now') WHERE stock_code=?", tuple(vals.get(k,"") for k in ("stock_name","market","sw_l1","sw_l2","sw_l3")) + (vals.get("em_industry",""), vals.get("source",""), vals.get("manual",0), r["stock_code"]))
+        c.execute("UPDATE stock_industry SET stock_name=?,market=?,sw_l1=?,sw_l2=?,sw_l3=?,em_industry=?,source=?,manual=?,updated_at=datetime('now') WHERE stock_code=?", tuple(vals.get(k,"") for k in ("stock_name","market","sw_l1","sw_l2","sw_l3")) + (vals.get("em_industry",""), vals.get("source",""), old[1], r["stock_code"]))
         n_up += 1
     else:
         c.execute("INSERT INTO stock_industry (stock_code,stock_name,market,sw_l1,sw_l2,sw_l3,em_industry,source,manual,updated_at) VALUES (?,?,?,?,?,?,?,?,0,datetime('now'))", tuple(r.get(k,"") for k in ("stock_code","stock_name","market","sw_l1","sw_l2","sw_l3","em_industry","source")))
@@ -119,7 +114,7 @@ def main() -> int:
         if third is None:
             time.sleep(args.cooldown)
             continue
-        targets = [(str(r["行业代码"]), r["行业名称"]) for _, r in third.iterrows()]
+        targets = [(str(r["行业代码"]), r["行业名称"], r["上级行业"]) for _, r in third.iterrows()]
         covered = covered_l3(db_path)
         pending = [t for t in targets if t[1] not in covered]
         if not pending:
@@ -128,11 +123,14 @@ def main() -> int:
                 merge_to_server(str(db_path))
             return 0
         log(f"剩余 {len(pending)} 个行业待采")
+        # 复用原 worker 的完整链回溯(l1/l2), 与页面「采集」行为一致
+        from app.stock_industry.fetch import sw_worker as m
+        l2_to_l1 = m._l2_to_l1()
+        db = sqlite3.connect(db_path)
         consec_fail = 0
         done_in_window = 0
-        c = sqlite3.connect(db_path)
-        for icode, l3name in pending:
-            frame = fetch_industry(icode)
+        for icode, l3name, l2name in pending:
+            frame = m._fetch_cons(icode)
             if frame is None:
                 consec_fail += 1
                 log(f"  ✗ {l3name} ({icode}) 连续失败 {consec_fail}")
@@ -147,15 +145,16 @@ def main() -> int:
                 code = str(raw_code).split(".", maxsplit=1)[0].strip()
                 if not code:
                     continue
-                c.execute("INSERT OR REPLACE INTO stock_industry "
-                          "(stock_code,stock_name,market,sw_l3,source,updated_at) VALUES (?,?,?,?, 'legulegu', datetime('now'))",
-                          (code, str(raw_name).strip(), "A", l3name))
+                db.execute("INSERT OR REPLACE INTO stock_industry "
+                           "(stock_code,stock_name,market,sw_l1,sw_l2,sw_l3,source,updated_at) VALUES (?,?,?,?,?,?, 'legulegu', datetime('now'))",
+                           (code, str(raw_name).strip(), "A",
+                            l2_to_l1.get(l2name, ""), l2name, l3name))
                 rows += 1
-            c.commit()
+            db.commit()
             done_in_window += 1
             log(f"  ✔ {l3name} ({icode}) +{rows} 行 (窗口内完成 {done_in_window})")
             time.sleep(SLEEP)
-        c.close()
+        db.close()
         left = len(pending) - done_in_window
         if left > 0:
             log(f"窗口结束, 仍剩约 {left} 行业, 冷却 {args.cooldown}s")
