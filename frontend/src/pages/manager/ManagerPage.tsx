@@ -17,6 +17,9 @@ export default function ManagerPage() {
   const [loading, setLoading] = useState(false)
   const [task, setTask] = useState<RunningTask | null>(null)
   const [stats, setStats] = useState<CoverageStats | null>(null)
+  // 采集范围: presetId 为空 = 全量(2.7万只, 极慢, 不建议); 选镜像预设则只采集其基金
+  const [presets, setPresets] = useState<{ id: number; name: string }[]>([])
+  const [scopePreset, setScopePreset] = useState<number | undefined>()
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadData = useCallback(async () => {
@@ -39,6 +42,11 @@ export default function ManagerPage() {
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { loadStats() }, [loadStats])
+  useEffect(() => {
+    request.get('/fund/presets')
+      .then((res) => setPresets((res.data || []).map((x: { id: number; name: string }) => ({ id: x.id, name: x.name }))))
+      .catch(() => undefined)
+  }, [])
 
   const pollTick = useCallback(async () => {
     try {
@@ -61,7 +69,9 @@ export default function ManagerPage() {
 
   const startSync = async () => {
     try {
-      await request.post('/fund_manager/sync')
+      await request.post('/fund_manager/sync', null, {
+        params: scopePreset ? { presetId: scopePreset } : {},
+      })
       message.info('采集任务已启动')
       pollTick()
     } catch (e: unknown) {
@@ -116,6 +126,14 @@ export default function ManagerPage() {
           <Button type="primary" icon={<SyncOutlined spin={!!task} />} onClick={startSync} disabled={!!task}>
             {task ? '采集中…' : '采集经理数据'}
           </Button>
+          <Select
+            value={scopePreset}
+            onChange={(v) => setScopePreset(v)}
+            placeholder="采集范围: 镜像预设"
+            allowClear
+            style={{ width: 200 }}
+            options={presets.map((x) => ({ value: x.id, label: x.name }))}
+          />
           <Input.Search
             placeholder="代码/名称/经理" allowClear style={{ width: 180 }}
             onSearch={(v) => { setKeyword(v); setPage(1) }}
