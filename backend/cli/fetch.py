@@ -64,6 +64,15 @@ def cmd_industry(args) -> None:
         f"✓ 行业映射({d['mode']}) {d['status']}：目标{d['target']} 成功{d['success']} 失败{d['fail']}"))
 
 
+def cmd_industry_sw2021(args) -> None:
+    """权威申万2021静态同步：拉一次「股票→三级」映射落库（替代/校准 legulegu 采集）。"""
+    from app.stock_industry.fetch.sw2021 import sync_sw2021
+    out = sync_sw2021()
+    output.emit(out, args.json, lambda d: print(
+        f"✓ 申万2021 同步完成：共{d['total']}股 新增{d['inserted']} 更新{d['updated']} "
+        f"跳过{d['skipped']}"))
+
+
 def cmd_detail(args) -> None:
     from app.fund_detail.fetch.worker import _process_one
     _run_per_fund(args, _process_one)

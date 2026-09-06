@@ -63,6 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=["sw", "em"], default="sw", help="sw=申万三级 / em=东财兜底")
     p.add_argument("--codes", help="仅重采指定三级行业代码(逗号)")
     p.set_defaults(fn=fetch.cmd_industry)
+    g.add_parser("sw2021", parents=[common],
+                 help="权威申万2021静态同步（一次性落库，替代 legulegu 采集）").set_defaults(
+                     fn=fetch.cmd_industry_sw2021)
     for name, fn, helptext in [("detail", fetch.cmd_detail, "基金详情"),
                                ("holdings", fetch.cmd_holdings, "基金持仓"),
                                ("nav", fetch.cmd_nav, "基金净值"),
