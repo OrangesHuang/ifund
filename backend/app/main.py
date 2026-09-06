@@ -38,7 +38,22 @@ def create_app() -> Flask:
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = (
         False if expires_days <= 0 else datetime.timedelta(days=expires_days)
     )
-    JWTManager(app)
+    jwt = JWTManager(app)
+
+    # 统一的鉴权失败状态码：本应用前端只在 401 时清 token 并跳登录页。
+    # flask-jwt-extended 默认对「签名校验失败」返回 422，会绕过前端的 401 处理，
+    # 导致 token 过期/更换密钥后所有需要登录的接口静默失败。这里统一收敛为 401。
+    @jwt.unauthorized_loader
+    def _jwt_unauthorized(_reason):
+        return jsonify({"detail": "缺少访问令牌"}), 401
+
+    @jwt.invalid_token_loader
+    def _jwt_invalid(reason):
+        return jsonify({"detail": f"访问令牌无效：{reason}"}), 401
+
+    @jwt.expired_token_loader
+    def _jwt_expired(_jwt_header, _jwt_payload):
+        return jsonify({"detail": "访问令牌已过期"}), 401
 
     # SQLite 后端：启动时自动建表（幂等）
     from app import db as database

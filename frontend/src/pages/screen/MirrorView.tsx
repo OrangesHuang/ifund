@@ -7,6 +7,7 @@ import { useScreenData } from './hooks/useScreenData'
 import { buildFundColumns } from '../fund/components/fundColumns'
 import FundDetailModal from '../fund/components/FundDetailModal'
 import NavTrendModal from '../fund/components/NavTrendModal'
+import AiReActPanel, { type ReActStep } from './components/AiReActPanel'
 import type { FundItem, QueryPreset } from '../fund/types'
 import { CONC_META, KIND_META, LUCK_META } from '../fund/aiMeta'
 
@@ -100,6 +101,11 @@ export default function MirrorView({
   const [elapsed, setElapsed] = useState(0)
   const [aiResult, setAiResult] = useState<Record<string, unknown> | null>(null)
   const [parseError, setParseError] = useState('')
+  // --- ReAct 浮窗（记录分析过程多轮进展）---
+  const [reactSteps, setReactSteps] = useState<ReActStep[]>([])
+  const [reactStatus, setReactStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [reactError, setReactError] = useState('')
+  const [reactName, setReactName] = useState('')
   const [promptDrawerOpen, setPromptDrawerOpen] = useState(false)
   const [promptSystem, setPromptSystem] = useState('')
   const [promptUser, setPromptUser] = useState('')
@@ -147,13 +153,17 @@ export default function MirrorView({
     }
   }
 
-  const handleAnalyze = async (code: string) => {
+  const handleAnalyze = async (code: string, name?: string) => {
     setAnalyzingCode(code)
     setStreamText('')
     setStreamDone(false)
     setElapsed(0)
     setAiResult(null)
     setParseError('')
+    setReactSteps([])
+    setReactStatus('running')
+    setReactError('')
+    setReactName(name ?? '')
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
@@ -191,7 +201,19 @@ export default function MirrorView({
                 streamTextRef.current = prev + evt.text
                 return streamTextRef.current
               })
+            } else if (evt.type === 'round') {
+              setReactSteps((prev) => [
+                ...prev,
+                {
+                  round: evt.round,
+                  thought: evt.thought,
+                  action: evt.action,
+                  args: evt.args ?? {},
+                  observation: evt.observation,
+                },
+              ])
             } else if (evt.type === 'done') {
+              setReactStatus('done')
               setStreamDone(true)
               // 从流式文本中提取 JSON 并解析
               const raw = streamTextRef.current
@@ -210,6 +232,8 @@ export default function MirrorView({
               onMirrorSaved?.()
             } else if (evt.type === 'error') {
               setStreamDone(true)
+              setReactStatus('error')
+              setReactError(evt.detail ?? '')
               message.error(`分析失败: ${evt.detail}`)
             }
           } catch { /* skip malformed */ }
@@ -230,6 +254,8 @@ export default function MirrorView({
   const handleCancelAnalyze = () => {
     abortRef.current?.abort()
     setAnalyzingCode(null)
+    setReactStatus('idle')
+    setReactSteps([])
   }
 
   const handleCloseStreamModal = () => {
@@ -237,6 +263,8 @@ export default function MirrorView({
       abortRef.current?.abort()
     }
     setAnalyzingCode(null)
+    setReactStatus('idle')
+    setReactSteps([])
   }
 
   // --- AI 结果格式化辅助 ---
@@ -280,7 +308,7 @@ export default function MirrorView({
           description="将调用 AI 流式分析该基金，约需 30-60 秒"
           okText="开始分析"
           cancelText="取消"
-          onConfirm={() => handleAnalyze(row.code)}
+          onConfirm={() => handleAnalyze(row.code, row.name)}
         >
           <Button size="small" type="link" icon={<ThunderboltOutlined />} loading={isLoading}>
             AI分析
@@ -687,6 +715,23 @@ export default function MirrorView({
         open={!!trend}
         onClose={() => setTrend(null)}
       />
+
+      {/* 浮窗：记录 AI ReAct 分析过程与多轮进展 */}
+      {(reactStatus === 'running' || reactStatus === 'done' || reactStatus === 'error') && (
+        <AiReActPanel
+          fundCode={analyzingCode ?? ''}
+          fundName={reactName}
+          steps={reactSteps}
+          status={reactStatus}
+          elapsed={elapsed}
+          error={reactError}
+          onClose={() => {
+            setReactStatus('idle')
+            setReactSteps([])
+            setReactError('')
+          }}
+        />
+      )}
 
       {/* 提示词编辑抽屉 */}
       <Drawer
