@@ -17,11 +17,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+# 让 `import app...` 可解析: 脚本在 scripts/, 后端在 repo 根/backend
+_BACKEND = os.environ.get("IFUND_BACKEND_DIR") or str(Path(__file__).resolve().parents[1] / "backend")
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
+os.chdir(_BACKEND)
 
 # ---- 窗口内参数(与 sw_worker 原逻辑一致/略保守) ----
 SLEEP = 2.0          # 行业间隔
