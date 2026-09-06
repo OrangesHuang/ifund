@@ -78,11 +78,19 @@ for r in rows:
 c.commit()
 print(f"merge: new={n_new} updated={n_up} manual_skipped={n_skip}")
 '''
-    proc = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", f"root@{host}", "python3 -c " + json.dumps(script)],
+    # 两步法: 脚本先落服务器文件, 再经 stdin 喂 JSON(避免 python -c 引号转义问题)
+    s1 = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", f"root@{host}", "cat > /tmp/merge_sw.py"],
+        input=script, capture_output=True, text=True, timeout=60,
+    )
+    if s1.returncode != 0:
+        log(f"写远程脚本失败: {s1.stderr[-120:]}")
+        return
+    s2 = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", f"root@{host}", "python3 /tmp/merge_sw.py"],
         input=payload, capture_output=True, text=True, timeout=300,
     )
-    log(f"merge rc={proc.returncode}: {(proc.stdout or proc.stderr).strip()[-200:]}")
+    log(f"merge rc={s2.returncode}: {(s2.stdout or s2.stderr).strip()[-200:]}")
 
 
 def fetch_industry(code: str):
